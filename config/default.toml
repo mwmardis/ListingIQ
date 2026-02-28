@@ -1,0 +1,106 @@
+# ListingIQ Default Configuration
+# Copy to config/local.toml and customize for your setup
+
+[scraper]
+# Sources to scrape: "redfin", "zillow", "realtor"
+sources = ["redfin"]
+# How often to scrape (minutes)
+interval_minutes = 60
+# Max concurrent requests
+max_concurrency = 5
+# Request delay range (seconds) to avoid rate limiting
+delay_min = 1.0
+delay_max = 3.0
+
+[scraper.search]
+# Target markets (city, state)
+markets = ["Austin, TX"]
+# Property types: "single_family", "multi_family", "condo", "townhouse"
+property_types = ["single_family", "multi_family"]
+# Price range
+min_price = 50000
+max_price = 500000
+# Bedrooms/bathrooms
+min_beds = 2
+max_beds = 6
+min_baths = 1
+max_baths = 4
+
+[analysis]
+# Which deal strategies to evaluate
+strategies = ["brrr", "cash_flow", "flip"]
+
+[analysis.brrr]
+# After Repair Value multiplier for purchase price (buy at X% of ARV)
+max_purchase_pct_of_arv = 0.70
+# Estimated rehab cost per sqft (dollars)
+rehab_cost_per_sqft = 30.0
+# Refinance LTV (loan-to-value ratio)
+refinance_ltv = 0.75
+# Minimum cash-on-cash return to alert (percentage)
+min_cash_on_cash_return = 8.0
+# Holding costs per month during rehab
+monthly_holding_cost = 1500.0
+# Estimated rehab duration (months)
+rehab_months = 4
+
+[analysis.cash_flow]
+# Down payment percentage
+down_payment_pct = 0.20
+# Mortgage interest rate (annual)
+interest_rate = 0.07
+# Loan term in years
+loan_term_years = 30
+# Monthly rent estimate multiplier (% of property value)
+rent_estimate_pct = 0.008
+# Vacancy rate
+vacancy_rate = 0.05
+# Property management fee (% of rent)
+management_fee_pct = 0.10
+# Annual maintenance (% of property value)
+maintenance_pct = 0.01
+# Annual insurance estimate
+annual_insurance = 1800.0
+# Minimum monthly cash flow to alert (dollars)
+min_monthly_cash_flow = 200.0
+# Minimum cap rate to alert (percentage)
+min_cap_rate = 6.0
+
+[analysis.flip]
+# Max purchase as % of ARV
+max_purchase_pct_of_arv = 0.65
+# Minimum profit to alert (dollars)
+min_profit = 30000.0
+# Selling costs (% of ARV)
+selling_cost_pct = 0.08
+# Holding cost per month
+monthly_holding_cost = 2000.0
+# Estimated project duration (months)
+project_months = 6
+
+[alerts]
+# Alert channels: "email", "sms", "webhook", "console"
+channels = ["console"]
+# Minimum deal score (0-100) to trigger alert
+min_deal_score = 70
+
+[alerts.email]
+smtp_host = ""
+smtp_port = 587
+smtp_user = ""
+smtp_password = ""
+from_address = ""
+to_addresses = []
+
+[alerts.sms]
+# Twilio credentials
+account_sid = ""
+auth_token = ""
+from_number = ""
+to_numbers = []
+
+[alerts.webhook]
+urls = []
+
+[database]
+url = "sqlite:///listingiq.db"
