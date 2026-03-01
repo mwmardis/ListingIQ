@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: listingiq
+    runtime: python
+    plan: free
+    buildCommand: pip install .
+    startCommand: uvicorn listingiq.asgi:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
