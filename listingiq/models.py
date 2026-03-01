@@ -129,6 +129,54 @@ class FlipMetrics(BaseModel):
     profit_per_month: float
 
 
+class RentalComp(BaseModel):
+    """A comparable rental listing used to estimate rent."""
+
+    address: str
+    monthly_rent: float
+    beds: int
+    baths: float
+    sqft: int = 0
+    distance_miles: float = 0.0
+    source: str = ""
+
+
+class SalesComp(BaseModel):
+    """A comparable sold listing used to estimate ARV."""
+
+    address: str
+    sold_price: float
+    sold_date: str = ""
+    beds: int
+    baths: float
+    sqft: int = 0
+    distance_miles: float = 0.0
+    price_per_sqft: float = 0.0
+    source: str = ""
+
+
+class CompData(BaseModel):
+    """Comparable data collected for a listing."""
+
+    rental_comps: list[RentalComp] = Field(default_factory=list)
+    sales_comps: list[SalesComp] = Field(default_factory=list)
+    estimated_rent: Optional[float] = None
+    estimated_arv: Optional[float] = None
+    rent_confidence: str = "low"  # low, medium, high
+    arv_confidence: str = "low"
+
+
+class OfferResult(BaseModel):
+    """Result of a reverse offer-price calculation."""
+
+    strategy: DealStrategy
+    target_metric: str
+    target_value: float
+    max_offer_price: float
+    metrics_at_offer: dict = Field(default_factory=dict)
+    discount_from_list: float = 0.0  # percentage below list price
+
+
 class Alert(BaseModel):
     """An alert generated for a good deal."""
 

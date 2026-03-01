@@ -172,6 +172,8 @@ def analyze(
     sqft: int = typer.Option(1500, "--sqft"),
     tax: float = typer.Option(0, "--tax", help="Annual property tax"),
     hoa: float = typer.Option(0, "--hoa", help="Monthly HOA"),
+    city: str = typer.Option("", "--city", help="City for comp lookup"),
+    state: str = typer.Option("", "--state", help="State for comp lookup"),
     config_path: Path = typer.Option(None, "--config", "-c"),
 ):
     """Analyze a specific property for investment potential."""
@@ -181,8 +183,8 @@ def analyze(
         source="manual",
         source_id="manual-entry",
         address=address,
-        city="",
-        state="",
+        city=city,
+        state=state,
         zip_code="",
         price=price,
         beds=beds,
@@ -192,14 +194,191 @@ def analyze(
         hoa_monthly=hoa,
     )
 
+    asyncio.run(_run_analyze(cfg, listing))
+
+
+async def _run_analyze(cfg, listing: Listing) -> None:
     from listingiq.analysis.engine import DealAnalyzer
+    from listingiq.comps.rental import RentalCompService
+    from listingiq.comps.sales import SalesCompService
+
+    rent_estimate = None
+    arv_estimate = None
+
+    # Fetch comps if enabled and we have location data
+    if cfg.analysis.comps.enabled and listing.city:
+        console.print("[dim]Fetching comparable data...[/dim]")
+
+        rental_svc = RentalCompService(cfg.analysis.comps, cfg.scraper)
+        sales_svc = SalesCompService(cfg.analysis.comps)
+
+        try:
+            rent, rental_comps, rent_conf = await rental_svc.estimate_rent(listing)
+            rent_estimate = rent
+            console.print(
+                f"  Rent estimate: ${rent:,.0f}/mo "
+                f"({len(rental_comps)} comps, {rent_conf} confidence)"
+            )
+        except Exception as e:
+            console.print(f"  [yellow]Rental comps unavailable: {e}[/yellow]")
+        finally:
+            await rental_svc.close()
+
+        try:
+            arv, sales_comps, arv_conf = await sales_svc.estimate_arv(listing)
+            arv_estimate = arv
+            console.print(
+                f"  ARV estimate: ${arv:,.0f} "
+                f"({len(sales_comps)} comps, {arv_conf} confidence)"
+            )
+        except Exception as e:
+            console.print(f"  [yellow]Sales comps unavailable: {e}[/yellow]")
+        finally:
+            await sales_svc.close()
+
+        console.print()
 
     analyzer = DealAnalyzer(cfg.analysis)
-    deals = analyzer.analyze_listing(listing)
+    deals = analyzer.analyze_listing(
+        listing, rent_estimate=rent_estimate, arv_estimate=arv_estimate
+    )
 
     for deal in deals:
         console.print()
         console.print(Panel(deal.summary, title=f"{deal.strategy.value.upper()} - Score: {deal.score}"))
+
+
+@app.command()
+def offer_price(
+    address: str = typer.Argument(..., help="Property address"),
+    price: float = typer.Option(..., "--price", "-p", help="Current list price"),
+    beds: int = typer.Option(3, "--beds"),
+    baths: float = typer.Option(2, "--baths"),
+    sqft: int = typer.Option(1500, "--sqft"),
+    tax: float = typer.Option(0, "--tax", help="Annual property tax"),
+    hoa: float = typer.Option(0, "--hoa", help="Monthly HOA"),
+    city: str = typer.Option("", "--city", help="City for comp lookup"),
+    state: str = typer.Option("", "--state", help="State for comp lookup"),
+    strategy: str = typer.Option(None, "--strategy", help="Strategy to calculate for (default: all)"),
+    target_metric: str = typer.Option(None, "--target-metric", help="Metric to target"),
+    target_value: float = typer.Option(None, "--target-value", help="Desired value for target metric"),
+    config_path: Path = typer.Option(None, "--config", "-c"),
+):
+    """Calculate the maximum offer price to achieve a target return.
+
+    Works backwards from your desired return to tell you the most you should pay.
+    """
+    cfg = load_config(config_path)
+
+    listing = Listing(
+        source="manual",
+        source_id="manual-entry",
+        address=address,
+        city=city,
+        state=state,
+        zip_code="",
+        price=price,
+        beds=beds,
+        baths=baths,
+        sqft=sqft,
+        tax_annual=tax,
+        hoa_monthly=hoa,
+    )
+
+    asyncio.run(_run_offer_price(cfg, listing, strategy, target_metric, target_value))
+
+
+async def _run_offer_price(cfg, listing, strategy, target_metric, target_value) -> None:
+    from listingiq.analysis.offer import OfferCalculator
+    from listingiq.comps.rental import RentalCompService
+    from listingiq.comps.sales import SalesCompService
+
+    rent_estimate = None
+    arv_estimate = None
+
+    # Fetch comps if enabled
+    if cfg.analysis.comps.enabled and listing.city:
+        console.print("[dim]Fetching comparable data...[/dim]")
+
+        rental_svc = RentalCompService(cfg.analysis.comps, cfg.scraper)
+        sales_svc = SalesCompService(cfg.analysis.comps)
+
+        try:
+            rent, rental_comps, rent_conf = await rental_svc.estimate_rent(listing)
+            rent_estimate = rent
+            console.print(f"  Rent estimate: ${rent:,.0f}/mo ({rent_conf} confidence)")
+        except Exception:
+            pass
+        finally:
+            await rental_svc.close()
+
+        try:
+            arv, sales_comps, arv_conf = await sales_svc.estimate_arv(listing)
+            arv_estimate = arv
+            console.print(f"  ARV estimate: ${arv:,.0f} ({arv_conf} confidence)")
+        except Exception:
+            pass
+        finally:
+            await sales_svc.close()
+
+        console.print()
+
+    calculator = OfferCalculator(cfg.analysis)
+
+    console.print(f"[bold]Offer Price Analysis for {listing.address}[/bold]")
+    console.print(f"List Price: ${listing.price:,.0f}\n")
+
+    if strategy:
+        results = [calculator.calculate_offer_price(
+            listing,
+            strategy=strategy,
+            target_metric=target_metric,
+            target_value=target_value,
+            rent_estimate=rent_estimate,
+            arv_estimate=arv_estimate,
+        )]
+    else:
+        results = calculator.calculate_all_offers(
+            listing,
+            rent_estimate=rent_estimate,
+            arv_estimate=arv_estimate,
+        )
+
+    table = Table(title="Maximum Offer Prices", show_lines=True)
+    table.add_column("Strategy", style="cyan")
+    table.add_column("Target", style="white")
+    table.add_column("Max Offer", style="bold green")
+    table.add_column("Discount", style="yellow")
+    table.add_column("Key Metric at Offer", style="white")
+
+    for r in results:
+        strategy_name = r.strategy.value.upper().replace("_", " ")
+        target_str = f"{r.target_metric}: {r.target_value:,.0f}"
+        if "return" in r.target_metric or "rate" in r.target_metric:
+            target_str = f"{r.target_metric}: {r.target_value:.1f}%"
+
+        # Pick the most relevant metric to show
+        m = r.metrics_at_offer
+        if r.strategy.value == "cash_flow":
+            key = f"CF: ${m.get('monthly_cash_flow', 0):,.0f}/mo | CoC: {m.get('cash_on_cash_return', 0):.1f}%"
+        elif r.strategy.value == "brrr":
+            key = f"CoC: {m.get('cash_on_cash_return', 0):.1f}% | CF: ${m.get('monthly_cash_flow', 0):,.0f}/mo"
+        elif r.strategy.value == "flip":
+            key = f"Profit: ${m.get('estimated_profit', 0):,.0f} | ROI: {m.get('roi', 0):.1f}%"
+        else:
+            key = ""
+
+        discount_str = f"{r.discount_from_list:.1f}% below list"
+
+        table.add_row(
+            strategy_name,
+            target_str,
+            f"${r.max_offer_price:,.0f}",
+            discount_str,
+            key,
+        )
+
+    console.print(table)
 
 
 @app.command()

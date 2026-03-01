@@ -16,8 +16,12 @@ class FlipAnalyzer:
     def __init__(self, config: FlipConfig):
         self.cfg = config
 
-    def analyze(self, listing: Listing) -> DealAnalysis:
-        metrics = self._calculate_metrics(listing)
+    def analyze(
+        self,
+        listing: Listing,
+        arv_estimate: float | None = None,
+    ) -> DealAnalysis:
+        metrics = self._calculate_metrics(listing, arv_estimate=arv_estimate)
         score = self._score(metrics)
         meets = self._meets_criteria(metrics)
 
@@ -30,11 +34,18 @@ class FlipAnalyzer:
             summary=self._summary(listing, metrics, score),
         )
 
-    def _calculate_metrics(self, listing: Listing) -> FlipMetrics:
+    def _calculate_metrics(
+        self,
+        listing: Listing,
+        arv_estimate: float | None = None,
+    ) -> FlipMetrics:
         purchase_price = listing.price
 
-        # Estimate ARV based on the 65% rule
-        estimated_arv = purchase_price / self.cfg.max_purchase_pct_of_arv
+        # Estimate ARV — use comp-based estimate if available
+        if arv_estimate is not None:
+            estimated_arv = arv_estimate
+        else:
+            estimated_arv = purchase_price / self.cfg.max_purchase_pct_of_arv
 
         # Rehab cost estimate based on difference between price and ARV
         # plus a baseline per-sqft cost
