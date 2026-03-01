@@ -78,6 +78,38 @@ monthly_holding_cost = 2000.0
 # Estimated project duration (months)
 project_months = 6
 
+[analysis.comps]
+# Enable comparable data for rent and ARV estimates
+enabled = true
+# Sales comp settings
+sales_radius_miles = 0.5
+sales_max_age_days = 180
+sales_max_comps = 10
+sales_sqft_tolerance = 0.20
+sales_beds_tolerance = 1
+# Rental comp settings
+rental_radius_miles = 1.0
+rental_max_comps = 10
+rental_beds_tolerance = 0
+# Confidence thresholds (number of comps needed)
+min_comps_for_high_confidence = 5
+min_comps_for_medium_confidence = 3
+# Fallback rent estimation (monthly $/sqft by property type)
+rent_per_sqft_single_family = 1.10
+rent_per_sqft_multi_family = 1.00
+rent_per_sqft_condo = 1.20
+rent_per_sqft_townhouse = 1.15
+
+[analysis.offer]
+# Default target returns for offer price calculation
+cash_flow_target_monthly = 200.0
+cash_flow_target_coc = 8.0
+brrr_target_coc = 10.0
+flip_target_profit = 30000.0
+# Binary search precision
+max_iterations = 50
+price_tolerance = 500.0
+
 [alerts]
 # Alert channels: "email", "sms", "webhook", "console"
 channels = ["console"]

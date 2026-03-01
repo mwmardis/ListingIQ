@@ -62,6 +62,22 @@ class TestBRRRAnalyzer:
         # Even expensive properties get analyzed, metrics just reflect reality
         assert deal.metrics["purchase_price"] == 500_000
 
+    def test_arv_override(self):
+        listing = _make_listing(price=150_000)
+        deal = self.analyzer.analyze(listing, arv_estimate=280_000)
+        assert deal.metrics["estimated_arv"] == 280_000
+
+    def test_rent_override(self):
+        listing = _make_listing(price=150_000)
+        deal = self.analyzer.analyze(listing, rent_estimate=1_800)
+        assert deal.metrics["monthly_rent_estimate"] == 1_800
+
+    def test_both_overrides(self):
+        listing = _make_listing(price=150_000)
+        deal = self.analyzer.analyze(listing, rent_estimate=1_800, arv_estimate=280_000)
+        assert deal.metrics["estimated_arv"] == 280_000
+        assert deal.metrics["monthly_rent_estimate"] == 1_800
+
 
 class TestCashFlowAnalyzer:
     def setup_method(self):
@@ -73,6 +89,17 @@ class TestCashFlowAnalyzer:
         deal = self.analyzer.analyze(listing)
         assert deal.strategy == DealStrategy.CASH_FLOW
         assert deal.score >= 0
+
+    def test_rent_override(self):
+        listing = _make_listing(price=200_000)
+        deal = self.analyzer.analyze(listing, rent_estimate=2_000)
+        assert deal.metrics["monthly_rent_estimate"] == 2_000
+
+    def test_rent_override_changes_cash_flow(self):
+        listing = _make_listing(price=200_000)
+        deal_default = self.analyzer.analyze(listing)
+        deal_high_rent = self.analyzer.analyze(listing, rent_estimate=3_000)
+        assert deal_high_rent.metrics["monthly_cash_flow"] > deal_default.metrics["monthly_cash_flow"]
 
     def test_positive_cash_flow(self):
         # Lower price should yield better cash flow
@@ -131,6 +158,14 @@ class TestFlipAnalyzer:
         deal = self.analyzer.analyze(listing)
         assert deal.metrics["estimated_profit"] > 0
 
+    def test_arv_override(self):
+        listing = _make_listing(price=150_000, sqft=1200)
+        deal = self.analyzer.analyze(listing, arv_estimate=300_000)
+        assert deal.metrics["estimated_arv"] == 300_000
+        # Higher ARV means more profit
+        deal_default = self.analyzer.analyze(listing)
+        assert deal.metrics["estimated_profit"] > deal_default.metrics["estimated_profit"]
+
 
 class TestDealAnalyzer:
     def test_analyze_all_strategies(self):
@@ -170,3 +205,24 @@ class TestDealAnalyzer:
         deals = analyzer.analyze_listing(listing)
         assert len(deals) == 1
         assert deals[0].strategy.value == "cash_flow"
+
+    def test_analyze_with_comp_overrides(self):
+        cfg = AnalysisConfig()
+        analyzer = DealAnalyzer(cfg)
+        listing = _make_listing(price=150_000)
+        deals = analyzer.analyze_listing(
+            listing, rent_estimate=1_800, arv_estimate=280_000
+        )
+        strategies = {d.strategy.value for d in deals}
+        assert "brrr" in strategies
+        assert "cash_flow" in strategies
+        assert "flip" in strategies
+        # Verify overrides were applied
+        for deal in deals:
+            if deal.strategy.value == "brrr":
+                assert deal.metrics["estimated_arv"] == 280_000
+                assert deal.metrics["monthly_rent_estimate"] == 1_800
+            elif deal.strategy.value == "cash_flow":
+                assert deal.metrics["monthly_rent_estimate"] == 1_800
+            elif deal.strategy.value == "flip":
+                assert deal.metrics["estimated_arv"] == 280_000

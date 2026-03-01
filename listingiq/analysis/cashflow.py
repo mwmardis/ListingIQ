@@ -17,8 +17,12 @@ class CashFlowAnalyzer:
     def __init__(self, config: CashFlowConfig):
         self.cfg = config
 
-    def analyze(self, listing: Listing) -> DealAnalysis:
-        metrics = self._calculate_metrics(listing)
+    def analyze(
+        self,
+        listing: Listing,
+        rent_estimate: float | None = None,
+    ) -> DealAnalysis:
+        metrics = self._calculate_metrics(listing, rent_estimate=rent_estimate)
         score = self._score(metrics)
         meets = self._meets_criteria(metrics)
 
@@ -31,7 +35,11 @@ class CashFlowAnalyzer:
             summary=self._summary(listing, metrics, score),
         )
 
-    def _calculate_metrics(self, listing: Listing) -> CashFlowMetrics:
+    def _calculate_metrics(
+        self,
+        listing: Listing,
+        rent_estimate: float | None = None,
+    ) -> CashFlowMetrics:
         purchase_price = listing.price
 
         # Financing
@@ -41,8 +49,11 @@ class CashFlowAnalyzer:
             loan_amount, self.cfg.interest_rate, self.cfg.loan_term_years
         )
 
-        # Income
-        monthly_rent = purchase_price * self.cfg.rent_estimate_pct
+        # Income — use comp-based rent if available, otherwise fall back to percentage
+        if rent_estimate is not None:
+            monthly_rent = rent_estimate
+        else:
+            monthly_rent = purchase_price * self.cfg.rent_estimate_pct
         effective_rent = monthly_rent * (1 - self.cfg.vacancy_rate)
 
         # Expenses

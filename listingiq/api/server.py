@@ -11,14 +11,18 @@ from fastapi.responses import HTMLResponse
 from listingiq.config import AppConfig
 from listingiq.models import Listing
 from listingiq.analysis.engine import DealAnalyzer
+from listingiq.analysis.offer import OfferCalculator
+from listingiq.comps.rental import RentalCompService
+from listingiq.comps.sales import SalesCompService
 from listingiq.scrapers import get_scraper
 from listingiq.db.repository import Repository
 
 
 def create_app(cfg: AppConfig) -> FastAPI:
-    app = FastAPI(title="ListingIQ", version="0.1.0")
+    app = FastAPI(title="ListingIQ", version="0.2.0")
     repo = Repository(cfg.database.url)
     analyzer = DealAnalyzer(cfg.analysis)
+    offer_calc = OfferCalculator(cfg.analysis)
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard():
@@ -81,14 +85,16 @@ def create_app(cfg: AppConfig) -> FastAPI:
         tax: float = Query(0),
         hoa: float = Query(0),
         address: str = Query("Manual Entry"),
+        city: str = Query(""),
+        state: str = Query(""),
     ):
-        """Analyze a single property."""
+        """Analyze a single property, with optional comp-based estimates."""
         listing = Listing(
             source="api",
             source_id="api-entry",
             address=address,
-            city="",
-            state="",
+            city=city,
+            state=state,
             zip_code="",
             price=price,
             beds=beds,
@@ -98,8 +104,41 @@ def create_app(cfg: AppConfig) -> FastAPI:
             hoa_monthly=hoa,
         )
 
-        deals = analyzer.analyze_listing(listing)
+        rent_estimate = None
+        arv_estimate = None
+        comp_info: dict = {}
+
+        # Fetch comps if enabled and location is provided
+        if cfg.analysis.comps.enabled and city:
+            rental_svc = RentalCompService(cfg.analysis.comps, cfg.scraper)
+            sales_svc = SalesCompService(cfg.analysis.comps)
+            try:
+                rent, rental_comps, rent_conf = await rental_svc.estimate_rent(listing)
+                rent_estimate = rent
+                comp_info["rent_estimate"] = rent
+                comp_info["rent_confidence"] = rent_conf
+                comp_info["rental_comps_count"] = len(rental_comps)
+            except Exception:
+                pass
+            finally:
+                await rental_svc.close()
+
+            try:
+                arv, sales_comps, arv_conf = await sales_svc.estimate_arv(listing)
+                arv_estimate = arv
+                comp_info["arv_estimate"] = arv
+                comp_info["arv_confidence"] = arv_conf
+                comp_info["sales_comps_count"] = len(sales_comps)
+            except Exception:
+                pass
+            finally:
+                await sales_svc.close()
+
+        deals = analyzer.analyze_listing(
+            listing, rent_estimate=rent_estimate, arv_estimate=arv_estimate
+        )
         return {
+            "comps": comp_info,
             "analyses": [
                 {
                     "strategy": d.strategy.value,
@@ -109,7 +148,91 @@ def create_app(cfg: AppConfig) -> FastAPI:
                     "summary": d.summary,
                 }
                 for d in deals
-            ]
+            ],
+        }
+
+    @app.get("/api/offer-price")
+    async def offer_price(
+        price: float = Query(..., description="Current list price"),
+        sqft: int = Query(1500),
+        beds: int = Query(3),
+        baths: float = Query(2),
+        tax: float = Query(0),
+        hoa: float = Query(0),
+        address: str = Query("Manual Entry"),
+        city: str = Query(""),
+        state: str = Query(""),
+        strategy: str = Query(None, description="Strategy to calculate for (default: all)"),
+        target_metric: str = Query(None, description="Metric to optimize"),
+        target_value: float = Query(None, description="Target value for the metric"),
+    ):
+        """Calculate max offer price to achieve a target return."""
+        listing = Listing(
+            source="api",
+            source_id="api-entry",
+            address=address,
+            city=city,
+            state=state,
+            zip_code="",
+            price=price,
+            beds=beds,
+            baths=baths,
+            sqft=sqft,
+            tax_annual=tax,
+            hoa_monthly=hoa,
+        )
+
+        rent_estimate = None
+        arv_estimate = None
+
+        if cfg.analysis.comps.enabled and city:
+            rental_svc = RentalCompService(cfg.analysis.comps, cfg.scraper)
+            sales_svc = SalesCompService(cfg.analysis.comps)
+            try:
+                rent, _, _ = await rental_svc.estimate_rent(listing)
+                rent_estimate = rent
+            except Exception:
+                pass
+            finally:
+                await rental_svc.close()
+
+            try:
+                arv, _, _ = await sales_svc.estimate_arv(listing)
+                arv_estimate = arv
+            except Exception:
+                pass
+            finally:
+                await sales_svc.close()
+
+        if strategy:
+            results = [offer_calc.calculate_offer_price(
+                listing,
+                strategy=strategy,
+                target_metric=target_metric,
+                target_value=target_value,
+                rent_estimate=rent_estimate,
+                arv_estimate=arv_estimate,
+            )]
+        else:
+            results = offer_calc.calculate_all_offers(
+                listing,
+                rent_estimate=rent_estimate,
+                arv_estimate=arv_estimate,
+            )
+
+        return {
+            "list_price": price,
+            "offers": [
+                {
+                    "strategy": r.strategy.value,
+                    "target_metric": r.target_metric,
+                    "target_value": r.target_value,
+                    "max_offer_price": r.max_offer_price,
+                    "discount_from_list": r.discount_from_list,
+                    "metrics_at_offer": r.metrics_at_offer,
+                }
+                for r in results
+            ],
         }
 
     @app.get("/api/deals")

@@ -18,9 +18,16 @@ class BRRRAnalyzer:
         self.cfg = brrr_config
         self.cf_cfg = cashflow_config
 
-    def analyze(self, listing: Listing) -> DealAnalysis:
+    def analyze(
+        self,
+        listing: Listing,
+        rent_estimate: float | None = None,
+        arv_estimate: float | None = None,
+    ) -> DealAnalysis:
         """Run BRRR analysis on a listing."""
-        metrics = self._calculate_metrics(listing)
+        metrics = self._calculate_metrics(
+            listing, rent_estimate=rent_estimate, arv_estimate=arv_estimate
+        )
         score = self._score(metrics)
         meets = self._meets_criteria(metrics)
 
@@ -33,14 +40,19 @@ class BRRRAnalyzer:
             summary=self._summary(listing, metrics, score),
         )
 
-    def _calculate_metrics(self, listing: Listing) -> BRRRMetrics:
+    def _calculate_metrics(
+        self,
+        listing: Listing,
+        rent_estimate: float | None = None,
+        arv_estimate: float | None = None,
+    ) -> BRRRMetrics:
         purchase_price = listing.price
 
-        # Estimate ARV: for properties needing rehab, ARV is typically
-        # higher than purchase price. We use the purchase/ARV ratio from config.
-        # If purchase is at max_purchase_pct_of_arv of ARV, then:
-        # ARV = purchase_price / max_purchase_pct_of_arv
-        estimated_arv = purchase_price / self.cfg.max_purchase_pct_of_arv
+        # Estimate ARV — use comp-based estimate if available
+        if arv_estimate is not None:
+            estimated_arv = arv_estimate
+        else:
+            estimated_arv = purchase_price / self.cfg.max_purchase_pct_of_arv
 
         # Rehab cost based on square footage
         rehab_cost = listing.sqft * self.cfg.rehab_cost_per_sqft if listing.sqft else 25_000.0
@@ -57,10 +69,11 @@ class BRRRAnalyzer:
         # Cash left in the deal after refinancing
         cash_left_in_deal = max(total_investment - refinance_amount, 0)
 
-        # Rental income estimate
-        monthly_rent = listing.price * self.cf_cfg.rent_estimate_pct
-        # Use ARV-based rent for post-rehab
-        monthly_rent_arv = estimated_arv * self.cf_cfg.rent_estimate_pct
+        # Rental income — use comp-based rent if available, otherwise estimate from ARV
+        if rent_estimate is not None:
+            monthly_rent_arv = rent_estimate
+        else:
+            monthly_rent_arv = estimated_arv * self.cf_cfg.rent_estimate_pct
 
         # Monthly expenses on the refinanced property
         monthly_mortgage = self._monthly_payment(

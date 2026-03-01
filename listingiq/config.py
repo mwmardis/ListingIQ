@@ -62,11 +62,47 @@ class FlipConfig(BaseModel):
     project_months: int = 6
 
 
+class CompsConfig(BaseModel):
+    enabled: bool = True
+    # Sales comps settings
+    sales_radius_miles: float = 0.5
+    sales_max_age_days: int = 180
+    sales_max_comps: int = 10
+    sales_sqft_tolerance: float = 0.20  # ±20% of subject sqft
+    sales_beds_tolerance: int = 1  # ±1 bedroom
+    # Rental comps settings
+    rental_radius_miles: float = 1.0
+    rental_max_comps: int = 10
+    rental_beds_tolerance: int = 0  # exact match preferred for rent
+    # Confidence thresholds
+    min_comps_for_high_confidence: int = 5
+    min_comps_for_medium_confidence: int = 3
+    # Fallback rent estimation factors (used when no comps found)
+    # Rent per sqft by property type (monthly $/sqft)
+    rent_per_sqft_single_family: float = 1.10
+    rent_per_sqft_multi_family: float = 1.00
+    rent_per_sqft_condo: float = 1.20
+    rent_per_sqft_townhouse: float = 1.15
+
+
+class OfferConfig(BaseModel):
+    # Default target returns for each strategy
+    cash_flow_target_monthly: float = 200.0
+    cash_flow_target_coc: float = 8.0
+    brrr_target_coc: float = 10.0
+    flip_target_profit: float = 30_000.0
+    # Binary search parameters
+    max_iterations: int = 50
+    price_tolerance: float = 500.0  # stop when within $500
+
+
 class AnalysisConfig(BaseModel):
     strategies: list[str] = ["brrr", "cash_flow", "flip"]
     brrr: BRRRConfig = BRRRConfig()
     cash_flow: CashFlowConfig = CashFlowConfig()
     flip: FlipConfig = FlipConfig()
+    comps: CompsConfig = CompsConfig()
+    offer: OfferConfig = OfferConfig()
 
 
 class EmailConfig(BaseModel):
