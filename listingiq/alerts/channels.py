@@ -130,6 +130,62 @@ class EmailChannel(BaseChannel):
         )
         logger.info("Email alert sent for %s", listing.address)
 
+    def build_digest_html(self, deals: list) -> str:
+        """Build an HTML digest email body from a list of deals."""
+        from itertools import groupby
+
+        sorted_deals = sorted(deals, key=lambda d: d.strategy.value)
+        groups = {k: list(v) for k, v in groupby(sorted_deals, key=lambda d: d.strategy.value)}
+
+        parts = [
+            "<h1>ListingIQ Deal Digest</h1>",
+            f"<p><strong>{len(deals)} deals</strong> found since last digest.</p>",
+        ]
+
+        for strategy, strategy_deals in groups.items():
+            label = strategy.upper().replace("_", " ")
+            parts.append(f"<h2>{label} ({len(strategy_deals)} deals)</h2>")
+            for deal in sorted(strategy_deals, key=lambda d: d.score, reverse=True):
+                listing = deal.listing
+                parts.append(
+                    f"<div style='border:1px solid #ccc;padding:10px;margin:5px 0'>"
+                    f"<strong>Score: {deal.score}</strong> — {listing.full_address}<br>"
+                    f"${listing.price:,.0f} | {listing.beds}bd/{listing.baths}ba | {listing.sqft:,} sqft<br>"
+                    f"<em>{deal.summary}</em>"
+                    f"</div>"
+                )
+
+        return "\n".join(parts)
+
+    async def send_digest(self, deals: list) -> None:
+        """Send a digest email with multiple deals."""
+        import aiosmtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        if not self.config.to_addresses or not deals:
+            return
+
+        html_body = self.build_digest_html(deals)
+        subject = f"ListingIQ Digest: {len(deals)} deals found"
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = self.config.from_address
+        msg["To"] = ", ".join(self.config.to_addresses)
+        msg.attach(MIMEText(f"{len(deals)} deals found. View in HTML.", "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+
+        await aiosmtplib.send(
+            msg,
+            hostname=self.config.smtp_host,
+            port=self.config.smtp_port,
+            username=self.config.smtp_user,
+            password=self.config.smtp_password,
+            use_tls=False,
+            start_tls=True,
+        )
+
 
 class SMSChannel(BaseChannel):
     """Sends deal alerts via SMS using Twilio."""

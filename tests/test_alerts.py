@@ -48,3 +48,18 @@ class TestInstantAlertThreshold:
         deal = _make_deal(score=85)
         qualified = [d for d in [deal] if d.meets_criteria and d.score >= cfg.min_deal_score]
         assert len(qualified) == 0
+
+
+class TestDigestEmail:
+    def test_build_digest_html(self):
+        """EmailChannel can build a digest HTML body."""
+        from listingiq.config import EmailConfig
+        from listingiq.alerts.channels import EmailChannel
+        channel = EmailChannel(EmailConfig(
+            smtp_host="test", from_address="test@test.com", to_addresses=["to@test.com"]
+        ))
+        deals = [_make_deal(score=90, strategy="brrr"), _make_deal(score=80, strategy="cash_flow")]
+        html = channel.build_digest_html(deals)
+        assert "BRRR" in html or "brrr" in html.lower()
+        assert "CASH FLOW" in html or "cash_flow" in html.lower()
+        assert "90" in html
