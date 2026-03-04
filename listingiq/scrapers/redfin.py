@@ -191,6 +191,8 @@ class RedfinScraper(BaseScraper):
                     days_on_market=home.get("dom", {}).get("value", 0) or 0,
                     hoa_monthly=home.get("hoa", {}).get("value", 0) or 0,
                     tax_annual=home.get("taxInfo", {}).get("amount", 0) or 0,
+                    stories=home.get("stories", 0) or 0,
+                    has_pool=home.get("pool") if "pool" in home else None,
                     raw_data={
                         "latitude": lat,
                         "longitude": lng,
