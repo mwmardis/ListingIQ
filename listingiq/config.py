@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # type: ignore[no-redef]
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +59,7 @@ class CashFlowConfig(BaseModel):
     maintenance_pct: float = 0.01
     annual_insurance: float = 1800.0
     min_monthly_cash_flow: float = 200.0
-    min_cap_rate: float = 6.0
+    min_cap_rate: float = 5.0
 
 
 class FlipConfig(BaseModel):

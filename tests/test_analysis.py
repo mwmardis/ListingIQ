@@ -133,6 +133,23 @@ class TestCashFlowAnalyzer:
             assert key in deal.metrics, f"Missing metric: {key}"
 
 
+    def test_cap_rate_default_lowered(self):
+        """Default min_cap_rate should be 5.0 not 6.0."""
+        from listingiq.config import CashFlowConfig
+        cfg = CashFlowConfig()
+        assert cfg.min_cap_rate == 5.0
+
+    def test_cheap_property_not_penalized(self):
+        """A $80k property with good rent shouldn't score worse than expensive one."""
+        cheap = _make_listing(price=80_000, sqft=900)
+        expensive = _make_listing(price=250_000, sqft=1800)
+        deal_cheap = self.analyzer.analyze(cheap, rent_estimate=1_000)
+        deal_expensive = self.analyzer.analyze(expensive, rent_estimate=2_000)
+        # Cheap property has $1000 rent on $80k — much better ratio
+        # Should score at least as well as expensive
+        assert deal_cheap.score >= deal_expensive.score
+
+
 class TestFlipAnalyzer:
     def setup_method(self):
         self.cfg = FlipConfig()
