@@ -52,7 +52,18 @@ class BRRRAnalyzer:
         if arv_estimate is not None:
             estimated_arv = arv_estimate
         else:
-            estimated_arv = purchase_price / self.cfg.max_purchase_pct_of_arv
+            # Age-aware ARV fallback (conservative)
+            if listing.year_built > 0:
+                age = 2026 - listing.year_built
+                if age < 15:
+                    multiplier = 1.15
+                elif age < 30:
+                    multiplier = 1.25
+                else:
+                    multiplier = 1.35
+            else:
+                multiplier = 1.25  # default for unknown age
+            estimated_arv = purchase_price * multiplier
 
         # Rehab cost based on square footage
         rehab_cost = listing.sqft * self.cfg.rehab_cost_per_sqft if listing.sqft else 25_000.0
@@ -74,6 +85,12 @@ class BRRRAnalyzer:
             monthly_rent_arv = rent_estimate
         else:
             monthly_rent_arv = estimated_arv * self.cf_cfg.rent_estimate_pct
+
+        # Multi-family: multiply per-unit rent by unit count
+        if listing.units > 1 and rent_estimate is None:
+            per_unit_sqft = listing.sqft / listing.units if listing.sqft else 0
+            per_unit_rent = per_unit_sqft * 1.10 if per_unit_sqft else estimated_arv * self.cf_cfg.rent_estimate_pct / listing.units
+            monthly_rent_arv = per_unit_rent * listing.units
 
         # Monthly expenses on the refinanced property
         monthly_mortgage = self._monthly_payment(

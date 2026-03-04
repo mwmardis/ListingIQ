@@ -63,6 +63,12 @@ class Repository:
                     days_on_market=listing.days_on_market,
                     hoa_monthly=listing.hoa_monthly,
                     tax_annual=listing.tax_annual,
+                    units=listing.units,
+                    has_pool=listing.has_pool,
+                    stories=listing.stories,
+                    school_rating=listing.school_rating,
+                    flood_zone=listing.flood_zone,
+                    crime_score=listing.crime_score,
                     description=listing.description,
                     raw_data=listing.raw_data,
                     price_history=[],
@@ -119,6 +125,16 @@ class Repository:
         """Fetch a listing by its ID."""
         with self._session() as session:
             return session.query(ListingRow).get(listing_id)
+
+    def get_deals_since(self, since: datetime, min_score: float = 0) -> list:
+        """Get deals analyzed after a given timestamp."""
+        with self._session() as session:
+            return (
+                session.query(DealRow)
+                .filter(DealRow.analyzed_at >= since, DealRow.score >= min_score)
+                .order_by(DealRow.score.desc())
+                .all()
+            )
 
     def listing_exists(self, source: str, source_id: str) -> bool:
         """Check if we've already seen this listing."""

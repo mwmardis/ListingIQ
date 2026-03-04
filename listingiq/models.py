@@ -50,6 +50,12 @@ class Listing(BaseModel):
     days_on_market: int = 0
     hoa_monthly: float = 0.0
     tax_annual: float = 0.0
+    units: int = 1
+    has_pool: Optional[bool] = None
+    stories: int = 0
+    school_rating: Optional[float] = None
+    flood_zone: Optional[str] = None
+    crime_score: Optional[float] = None
     description: str = ""
     images: list[str] = Field(default_factory=list)
     raw_data: dict = Field(default_factory=dict)
@@ -64,6 +70,16 @@ class Listing(BaseModel):
         if self.sqft > 0:
             return self.price / self.sqft
         return 0.0
+
+
+class UnitMix(BaseModel):
+    """Per-unit breakdown for small multi-family (2-4 units)."""
+
+    unit_number: int
+    beds: int = 0
+    baths: float = 0
+    sqft: int = 0
+    estimated_rent: float = 0.0
 
 
 class DealAnalysis(BaseModel):
@@ -173,6 +189,7 @@ class OfferResult(BaseModel):
     target_metric: str
     target_value: float
     max_offer_price: float
+    dom_adjusted_price: float = 0.0
     metrics_at_offer: dict = Field(default_factory=dict)
     discount_from_list: float = 0.0  # percentage below list price
 

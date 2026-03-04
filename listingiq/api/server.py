@@ -12,6 +12,8 @@ from listingiq.config import AppConfig
 from listingiq.models import Listing
 from listingiq.analysis.engine import DealAnalyzer
 from listingiq.analysis.offer import OfferCalculator
+from listingiq.analysis.room_potential import assess_room_potential
+from listingiq.analysis.points import calculate_points_table
 from listingiq.comps.rental import RentalCompService
 from listingiq.comps.sales import SalesCompService
 from listingiq.scrapers import get_scraper
@@ -71,6 +73,18 @@ def create_app(cfg: AppConfig) -> FastAPI:
                     "url": d.listing.url,
                     "metrics": d.metrics,
                     "summary": d.summary,
+                    "room_potential": assess_room_potential(d.listing),
+                    "days_on_market": d.listing.days_on_market,
+                    "secondary": {
+                        "year_built": d.listing.year_built,
+                        "tax_annual": d.listing.tax_annual,
+                        "lot_sqft": d.listing.lot_sqft,
+                        "has_pool": d.listing.has_pool,
+                        "school_rating": d.listing.school_rating,
+                        "flood_zone": d.listing.flood_zone,
+                        "crime_score": d.listing.crime_score,
+                        "stories": d.listing.stories,
+                    },
                 }
                 for d in deals
             ],
@@ -87,6 +101,8 @@ def create_app(cfg: AppConfig) -> FastAPI:
         address: str = Query("Manual Entry"),
         city: str = Query(""),
         state: str = Query(""),
+        rent: float = Query(None, description="Manual monthly rent estimate"),
+        arv: float = Query(None, description="Manual ARV estimate"),
     ):
         """Analyze a single property, with optional comp-based estimates."""
         listing = Listing(
@@ -104,41 +120,61 @@ def create_app(cfg: AppConfig) -> FastAPI:
             hoa_monthly=hoa,
         )
 
-        rent_estimate = None
-        arv_estimate = None
+        # Use user-provided values; comp lookup provides comparison data
+        rent_estimate = rent
+        arv_estimate = arv
         comp_info: dict = {}
 
-        # Fetch comps if enabled and location is provided
+        # Fetch comps if enabled and location is provided (for comparison)
         if cfg.analysis.comps.enabled and city:
             rental_svc = RentalCompService(cfg.analysis.comps, cfg.scraper)
             sales_svc = SalesCompService(cfg.analysis.comps)
             try:
-                rent, rental_comps, rent_conf = await rental_svc.estimate_rent(listing)
-                rent_estimate = rent
-                comp_info["rent_estimate"] = rent
+                comp_rent, rental_comps, rent_conf = await rental_svc.estimate_rent(listing)
+                comp_info["rent_estimate"] = comp_rent
                 comp_info["rent_confidence"] = rent_conf
                 comp_info["rental_comps_count"] = len(rental_comps)
+                if rent_estimate is None:
+                    rent_estimate = comp_rent
             except Exception:
                 pass
             finally:
                 await rental_svc.close()
 
             try:
-                arv, sales_comps, arv_conf = await sales_svc.estimate_arv(listing)
-                arv_estimate = arv
-                comp_info["arv_estimate"] = arv
+                comp_arv, sales_comps, arv_conf = await sales_svc.estimate_arv(listing)
+                comp_info["arv_estimate"] = comp_arv
                 comp_info["arv_confidence"] = arv_conf
                 comp_info["sales_comps_count"] = len(sales_comps)
+                if arv_estimate is None:
+                    arv_estimate = comp_arv
             except Exception:
                 pass
             finally:
                 await sales_svc.close()
+
+        if rent_estimate is not None:
+            comp_info["rent_used"] = rent_estimate
+        if arv_estimate is not None:
+            comp_info["arv_used"] = arv_estimate
 
         deals = analyzer.analyze_listing(
             listing, rent_estimate=rent_estimate, arv_estimate=arv_estimate
         )
         return {
             "comps": comp_info,
+            "room_potential": assess_room_potential(listing),
+            "days_on_market": listing.days_on_market,
+            "secondary": {
+                "year_built": listing.year_built,
+                "tax_annual": listing.tax_annual,
+                "lot_sqft": listing.lot_sqft,
+                "has_pool": listing.has_pool,
+                "school_rating": listing.school_rating,
+                "flood_zone": listing.flood_zone,
+                "crime_score": listing.crime_score,
+                "stories": listing.stories,
+            },
             "analyses": [
                 {
                     "strategy": d.strategy.value,
@@ -165,6 +201,8 @@ def create_app(cfg: AppConfig) -> FastAPI:
         strategy: str = Query(None, description="Strategy to calculate for (default: all)"),
         target_metric: str = Query(None, description="Metric to optimize"),
         target_value: float = Query(None, description="Target value for the metric"),
+        rent: float = Query(None, description="Manual monthly rent estimate"),
+        arv: float = Query(None, description="Manual ARV estimate"),
     ):
         """Calculate max offer price to achieve a target return."""
         listing = Listing(
@@ -182,23 +220,25 @@ def create_app(cfg: AppConfig) -> FastAPI:
             hoa_monthly=hoa,
         )
 
-        rent_estimate = None
-        arv_estimate = None
+        rent_estimate = rent
+        arv_estimate = arv
 
         if cfg.analysis.comps.enabled and city:
             rental_svc = RentalCompService(cfg.analysis.comps, cfg.scraper)
             sales_svc = SalesCompService(cfg.analysis.comps)
             try:
-                rent, _, _ = await rental_svc.estimate_rent(listing)
-                rent_estimate = rent
+                comp_rent, _, _ = await rental_svc.estimate_rent(listing)
+                if rent_estimate is None:
+                    rent_estimate = comp_rent
             except Exception:
                 pass
             finally:
                 await rental_svc.close()
 
             try:
-                arv, _, _ = await sales_svc.estimate_arv(listing)
-                arv_estimate = arv
+                comp_arv, _, _ = await sales_svc.estimate_arv(listing)
+                if arv_estimate is None:
+                    arv_estimate = comp_arv
             except Exception:
                 pass
             finally:
@@ -220,19 +260,26 @@ def create_app(cfg: AppConfig) -> FastAPI:
                 arv_estimate=arv_estimate,
             )
 
+        offer_dicts = []
+        for r in results:
+            points_data = calculate_points_table(
+                loan_amount=r.max_offer_price * (1 - cfg.analysis.cash_flow.down_payment_pct),
+                base_rate=cfg.analysis.cash_flow.interest_rate,
+            )
+            offer_dicts.append({
+                "strategy": r.strategy.value,
+                "target_metric": r.target_metric,
+                "target_value": r.target_value,
+                "max_offer_price": r.max_offer_price,
+                "dom_adjusted_price": r.dom_adjusted_price,
+                "discount_from_list": r.discount_from_list,
+                "metrics_at_offer": r.metrics_at_offer,
+                "points_table": points_data,
+            })
+
         return {
             "list_price": price,
-            "offers": [
-                {
-                    "strategy": r.strategy.value,
-                    "target_metric": r.target_metric,
-                    "target_value": r.target_value,
-                    "max_offer_price": r.max_offer_price,
-                    "discount_from_list": r.discount_from_list,
-                    "metrics_at_offer": r.metrics_at_offer,
-                }
-                for r in results
-            ],
+            "offers": offer_dicts,
         }
 
     @app.get("/api/deals")
@@ -982,6 +1029,93 @@ def _dashboard_html() -> str:
         .analysis-card:nth-child(1) { animation-delay: 0s; }
         .analysis-card:nth-child(2) { animation-delay: 0.08s; }
         .analysis-card:nth-child(3) { animation-delay: 0.16s; }
+
+        /* ── DOM Badge ── */
+        .dom-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .dom-green { background: var(--accent-dim); color: var(--accent); }
+        .dom-yellow { background: var(--gold-dim); color: var(--gold); }
+        .dom-red { background: var(--red-dim); color: var(--red); }
+
+        /* ── Room Potential Badge ── */
+        .room-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .room-strong { background: var(--accent-dim); color: var(--accent); }
+        .room-likely { background: var(--gold-dim); color: var(--gold); }
+
+        /* ── Property Details Collapsible ── */
+        .property-details {
+            display: none;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+        .property-details.open { display: grid; }
+        .details-toggle {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-family: 'DM Sans', sans-serif;
+            cursor: pointer;
+            padding: 0.3rem 0.7rem;
+            border-radius: var(--radius-xs);
+            transition: all 0.2s ease;
+        }
+        .details-toggle:hover {
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        /* ── Points Table ── */
+        .points-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+            font-size: 0.8rem;
+        }
+        .points-table th {
+            text-align: left;
+            padding: 0.5rem 0.6rem;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+        .points-table td {
+            padding: 0.5rem 0.6rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .points-table tr:hover td { color: var(--text-primary); }
+        .points-table .row-highlight td { color: var(--accent); font-weight: 600; }
+
+        /* ── DOM Adjusted Price ── */
+        .dom-adjusted {
+            font-size: 0.85rem;
+            color: var(--gold);
+            margin-top: 0.25rem;
+        }
     </style>
 </head>
 <body>
@@ -1058,6 +1192,28 @@ def _dashboard_html() -> str:
                         <input type="number" id="a-hoa" placeholder="0" value="0">
                     </div>
                 </div>
+                <div class="section-header" style="margin-top:1.5rem;">
+                    <div class="section-title">Market Estimates</div>
+                    <span style="font-size:0.78rem;color:var(--text-muted);">Optional — leave blank to auto-estimate</span>
+                </div>
+                <div class="form-grid">
+                    <div class="field">
+                        <label>City</label>
+                        <input type="text" id="a-city" placeholder="Austin">
+                    </div>
+                    <div class="field">
+                        <label>State</label>
+                        <input type="text" id="a-state" placeholder="TX" maxlength="2">
+                    </div>
+                    <div class="field">
+                        <label>Est. Monthly Rent ($)</label>
+                        <input type="number" id="a-rent" placeholder="Auto-estimate">
+                    </div>
+                    <div class="field">
+                        <label>Est. ARV ($)</label>
+                        <input type="number" id="a-arv" placeholder="Auto-estimate">
+                    </div>
+                </div>
                 <div class="btn-row">
                     <button class="btn btn-primary" onclick="analyzeProperty()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -1088,8 +1244,8 @@ def _dashboard_html() -> str:
                     <div class="field">
                         <label>Source</label>
                         <select id="source">
-                            <option value="redfin">Redfin</option>
                             <option value="zillow">Zillow</option>
+                            <option value="redfin">Redfin</option>
                             <option value="realtor">Realtor.com</option>
                         </select>
                     </div>
@@ -1162,6 +1318,10 @@ def _dashboard_html() -> str:
                         <input type="number" id="o-tax" placeholder="3,000" value="3000">
                     </div>
                     <div class="field">
+                        <label>Monthly HOA</label>
+                        <input type="number" id="o-hoa" placeholder="0" value="0">
+                    </div>
+                    <div class="field">
                         <label>Strategy</label>
                         <select id="o-strategy">
                             <option value="">All Strategies</option>
@@ -1169,6 +1329,28 @@ def _dashboard_html() -> str:
                             <option value="cash_flow">Cash Flow</option>
                             <option value="flip">Flip</option>
                         </select>
+                    </div>
+                </div>
+                <div class="section-header" style="margin-top:1.5rem;">
+                    <div class="section-title">Market Estimates</div>
+                    <span style="font-size:0.78rem;color:var(--text-muted);">Optional — leave blank to auto-estimate</span>
+                </div>
+                <div class="form-grid">
+                    <div class="field">
+                        <label>City</label>
+                        <input type="text" id="o-city" placeholder="Austin">
+                    </div>
+                    <div class="field">
+                        <label>State</label>
+                        <input type="text" id="o-state" placeholder="TX" maxlength="2">
+                    </div>
+                    <div class="field">
+                        <label>Est. Monthly Rent ($)</label>
+                        <input type="number" id="o-rent" placeholder="Auto-estimate">
+                    </div>
+                    <div class="field">
+                        <label>Est. ARV ($)</label>
+                        <input type="number" id="o-arv" placeholder="Auto-estimate">
                     </div>
                 </div>
                 <div class="btn-row">
@@ -1225,6 +1407,65 @@ def _dashboard_html() -> str:
 
     function strategyClass(s) {
         return 'strategy-' + s.toLowerCase().replace(/\\s+/g, '_');
+    }
+
+    /* ── DOM Badge ── */
+    function domBadgeHtml(days) {
+        if (days === undefined || days === null || days <= 0) return '';
+        let cls = 'dom-green';
+        if (days >= 60) cls = 'dom-red';
+        else if (days >= 30) cls = 'dom-yellow';
+        return `<span class="dom-badge ${cls}">${days} DOM</span>`;
+    }
+
+    /* ── Room Potential Badge ── */
+    function roomBadgeHtml(rp) {
+        if (!rp || rp.potential === 'none') return '';
+        const cls = rp.potential === 'strong' ? 'room-strong' : 'room-likely';
+        const icon = rp.potential === 'strong' ? '+' : '~';
+        return `<span class="room-badge ${cls}">${icon} Room Potential</span>`;
+    }
+
+    /* ── Secondary Data Panel ── */
+    function secondaryPanelHtml(sec, id) {
+        if (!sec) return '';
+        const items = [];
+        if (sec.year_built) items.push({l: 'Year Built', v: sec.year_built});
+        if (sec.lot_sqft) items.push({l: 'Lot SqFt', v: sec.lot_sqft.toLocaleString()});
+        if (sec.tax_annual) items.push({l: 'Annual Tax', v: '$' + Number(sec.tax_annual).toLocaleString()});
+        if (sec.stories) items.push({l: 'Stories', v: sec.stories});
+        if (sec.has_pool !== null && sec.has_pool !== undefined) items.push({l: 'Pool', v: sec.has_pool ? 'Yes' : 'No'});
+        if (sec.school_rating !== null && sec.school_rating !== undefined) items.push({l: 'School Rating', v: sec.school_rating + '/10'});
+        if (sec.flood_zone) items.push({l: 'Flood Zone', v: sec.flood_zone});
+        if (sec.crime_score !== null && sec.crime_score !== undefined) items.push({l: 'Crime Score', v: sec.crime_score});
+        if (!items.length) return '';
+        const cells = items.map(i => `<div class="metric-cell"><div class="metric-label">${i.l}</div><div class="metric-value">${i.v}</div></div>`).join('');
+        return `<button class="details-toggle" onclick="document.getElementById('${id}').classList.toggle('open')">Property Details</button>
+            <div class="property-details" id="${id}">${cells}</div>`;
+    }
+
+    /* ── Points Table ── */
+    function pointsTableHtml(pts) {
+        if (!pts || !pts.length) return '';
+        const rows = pts.map(p =>
+            `<tr class="${p.points === 0 ? 'row-highlight' : ''}">
+                <td>${p.points}</td>
+                <td>${(p.rate * 100).toFixed(2)}%</td>
+                <td>$${p.monthly_payment.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
+                <td>$${p.point_cost.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
+                <td>${p.break_even_months ? p.break_even_months + ' mo' : '--'}</td>
+                <td>$${p.total_interest.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
+            </tr>`
+        ).join('');
+        return `<div style="margin-top:1rem;">
+            <button class="details-toggle" onclick="this.nextElementSibling.classList.toggle('open');this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">Points Comparison</button>
+            <div style="display:none;">
+                <table class="points-table">
+                    <thead><tr><th>Points</th><th>Rate</th><th>Payment</th><th>Cost</th><th>Break-Even</th><th>Total Interest</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </div>`;
     }
 
     /* ── Deal Scanner ── */
@@ -1298,11 +1539,14 @@ def _dashboard_html() -> str:
                             <span>${deal.beds}bd / ${deal.baths}ba</span>
                             <span class="deal-meta-sep"></span>
                             <span>${deal.sqft ? deal.sqft.toLocaleString() + ' sqft' : 'N/A'}</span>
+                            ${domBadgeHtml(deal.days_on_market)}
+                            ${roomBadgeHtml(deal.room_potential)}
                         </div>
                     </div>
                     <span class="strategy-tag ${strategyClass(deal.strategy)}">${strat}</span>
                 </div>
                 <div class="deal-metrics-grid">${metricHtml}</div>
+                ${secondaryPanelHtml(deal.secondary, 'sec-deal-' + i)}
             </div>`;
         }).join('');
     }
@@ -1315,17 +1559,61 @@ def _dashboard_html() -> str:
         const baths = document.getElementById('a-baths').value;
         const tax = document.getElementById('a-tax').value;
         const hoa = document.getElementById('a-hoa').value;
+        const city = document.getElementById('a-city').value;
+        const state = document.getElementById('a-state').value;
+        const rent = document.getElementById('a-rent').value;
+        const arv = document.getElementById('a-arv').value;
 
         const container = document.getElementById('analysis-results');
         container.innerHTML = `<div class="spinner-wrap visible"><div class="spinner"></div><div class="spinner-text">Analyzing property...</div></div>`;
 
         try {
-            const resp = await fetch(
-                `/api/analyze?price=${price}&sqft=${sqft}&beds=${beds}&baths=${baths}&tax=${tax}&hoa=${hoa}`
-            );
+            let url = `/api/analyze?price=${price}&sqft=${sqft}&beds=${beds}&baths=${baths}&tax=${tax}&hoa=${hoa}`;
+            if (city) url += `&city=${encodeURIComponent(city)}`;
+            if (state) url += `&state=${encodeURIComponent(state)}`;
+            if (rent) url += `&rent=${rent}`;
+            if (arv) url += `&arv=${arv}`;
+            const resp = await fetch(url);
             const data = await resp.json();
 
-            container.innerHTML = data.analyses.map((a, i) => {
+            let compHtml = '';
+            if (data.comps && Object.keys(data.comps).length > 0) {
+                const c = data.comps;
+                const items = [];
+                if (c.rent_used) items.push(`<span>Rent used: <strong>$${Number(c.rent_used).toLocaleString()}/mo</strong></span>`);
+                if (c.rent_estimate && c.rent_used && c.rent_estimate !== c.rent_used) items.push(`<span style="color:var(--text-muted)">(Comp est: $${Number(c.rent_estimate).toLocaleString()}/mo, ${c.rent_confidence || '?'} conf.)</span>`);
+                if (c.arv_used) items.push(`<span>ARV used: <strong>$${Number(c.arv_used).toLocaleString()}</strong></span>`);
+                if (c.arv_estimate && c.arv_used && c.arv_estimate !== c.arv_used) items.push(`<span style="color:var(--text-muted)">(Comp est: $${Number(c.arv_estimate).toLocaleString()}, ${c.arv_confidence || '?'} conf.)</span>`);
+                if (items.length) {
+                    compHtml = `<div class="glass-card" style="margin-bottom:1rem;padding:0.75rem 1rem;font-size:0.82rem;display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;">
+                        <span style="color:var(--accent);font-weight:600;">Estimates</span>${items.join('')}
+                    </div>`;
+                }
+            }
+
+            let rpHtml = '';
+            if (data.room_potential && data.room_potential.potential !== 'none') {
+                rpHtml = roomBadgeHtml(data.room_potential);
+                if (data.room_potential.description) {
+                    rpHtml += `<span style="font-size:0.78rem;color:var(--text-secondary);margin-left:0.5rem;">${data.room_potential.description}</span>`;
+                }
+                rpHtml = `<div class="glass-card" style="margin-bottom:1rem;padding:0.75rem 1rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">` + rpHtml + `</div>`;
+            }
+
+            let domHtml = '';
+            if (data.days_on_market > 0) {
+                domHtml = `<div class="glass-card" style="margin-bottom:1rem;padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;font-size:0.82rem;">
+                    ${domBadgeHtml(data.days_on_market)}
+                    <span style="color:var(--text-secondary);">Days on market</span>
+                </div>`;
+            }
+
+            let secHtml = secondaryPanelHtml(data.secondary, 'sec-analyze');
+            if (secHtml) {
+                secHtml = `<div class="glass-card" style="margin-bottom:1rem;padding:0.75rem 1rem;">${secHtml}</div>`;
+            }
+
+            container.innerHTML = compHtml + rpHtml + domHtml + secHtml + data.analyses.map((a, i) => {
                 const strat = a.strategy.replace('_', ' ');
                 return `<div class="analysis-card" style="animation-delay:${i * 0.08}s">
                     <div class="analysis-top">
@@ -1352,13 +1640,22 @@ def _dashboard_html() -> str:
         const beds = document.getElementById('o-beds').value;
         const baths = document.getElementById('o-baths').value;
         const tax = document.getElementById('o-tax').value;
+        const hoa = document.getElementById('o-hoa').value;
         const strategy = document.getElementById('o-strategy').value;
+        const city = document.getElementById('o-city').value;
+        const state = document.getElementById('o-state').value;
+        const rent = document.getElementById('o-rent').value;
+        const arv = document.getElementById('o-arv').value;
 
         const container = document.getElementById('offer-results');
         container.innerHTML = `<div class="spinner-wrap visible"><div class="spinner"></div><div class="spinner-text">Calculating optimal offer prices...</div></div>`;
 
-        let url = `/api/offer-price?price=${price}&sqft=${sqft}&beds=${beds}&baths=${baths}&tax=${tax}`;
+        let url = `/api/offer-price?price=${price}&sqft=${sqft}&beds=${beds}&baths=${baths}&tax=${tax}&hoa=${hoa}`;
         if (strategy) url += `&strategy=${strategy}`;
+        if (city) url += `&city=${encodeURIComponent(city)}`;
+        if (state) url += `&state=${encodeURIComponent(state)}`;
+        if (rent) url += `&rent=${rent}`;
+        if (arv) url += `&arv=${arv}`;
 
         try {
             const resp = await fetch(url);
@@ -1366,13 +1663,17 @@ def _dashboard_html() -> str:
 
             container.innerHTML = data.offers.map((o, i) => {
                 const strat = o.strategy.replace('_', ' ');
-                const discount = (o.discount_from_list * 100).toFixed(1);
+                const discount = o.discount_from_list.toFixed(1);
                 const metricsHtml = o.metrics_at_offer ? Object.entries(o.metrics_at_offer).map(([k, v]) =>
                     `<div class="metric-cell">
                         <div class="metric-label">${prettyLabel(k)}</div>
                         <div class="metric-value">${fmtMetric(k, v)}</div>
                     </div>`
                 ).join('') : '';
+
+                const domAdj = o.dom_adjusted_price && o.dom_adjusted_price !== o.max_offer_price
+                    ? `<div class="dom-adjusted">DOM-Adjusted: $${o.dom_adjusted_price.toLocaleString('en-US', {maximumFractionDigits: 0})}</div>`
+                    : '';
 
                 return `<div class="offer-result" style="animation-delay:${i * 0.08}s">
                     <div class="offer-header">
@@ -1385,10 +1686,12 @@ def _dashboard_html() -> str:
                         <span class="offer-discount">${discount}% below list</span>
                     </div>
                     <div class="offer-price-big">$${o.max_offer_price.toLocaleString('en-US', {maximumFractionDigits: 0})}</div>
+                    ${domAdj}
                     <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1rem;">
                         Max offer to hit your target return
                     </div>
                     ${metricsHtml ? `<div class="deal-metrics-grid">${metricsHtml}</div>` : ''}
+                    ${pointsTableHtml(o.points_table)}
                 </div>`;
             }).join('');
 

@@ -77,6 +77,55 @@ def _run_cycle_sync(cfg: AppConfig) -> None:
     asyncio.run(_run_cycle(cfg))
 
 
+async def _run_digest(cfg: AppConfig) -> None:
+    """Send a digest email with recent qualifying deals."""
+    from datetime import timedelta
+    from listingiq.alerts.channels import EmailChannel
+
+    repo = Repository(cfg.database.url)
+    if cfg.alerts.digest.schedule == "daily":
+        since = datetime.utcnow() - timedelta(days=1)
+    else:
+        since = datetime.utcnow() - timedelta(weeks=1)
+
+    deal_rows = repo.get_deals_since(since, min_score=cfg.alerts.digest.min_score)
+    if not deal_rows:
+        logger.info("No deals for digest")
+        return
+
+    from listingiq.models import DealAnalysis, DealStrategy
+    deals = []
+    for row in deal_rows:
+        listing_row = repo.get_listing_by_id(row.listing_id)
+        if not listing_row:
+            continue
+        listing = Listing(
+            source=listing_row.source, source_id=listing_row.source_id,
+            address=listing_row.address, city=listing_row.city,
+            state=listing_row.state, zip_code=listing_row.zip_code,
+            price=listing_row.price, beds=listing_row.beds,
+            baths=listing_row.baths, sqft=listing_row.sqft,
+        )
+        deal = DealAnalysis(
+            listing=listing,
+            strategy=DealStrategy(row.strategy),
+            score=row.score,
+            metrics=row.metrics or {},
+            meets_criteria=row.meets_criteria,
+            summary=row.summary or "",
+        )
+        deals.append(deal)
+
+    if deals and cfg.alerts.email.smtp_host:
+        channel = EmailChannel(cfg.alerts.email)
+        await channel.send_digest(deals)
+        logger.info("Digest sent with %d deals", len(deals))
+
+
+def _run_digest_sync(cfg: AppConfig) -> None:
+    asyncio.run(_run_digest(cfg))
+
+
 def start_scheduler(cfg: AppConfig) -> None:
     """Start the blocking scheduler."""
     scheduler = BlockingScheduler()
@@ -89,6 +138,25 @@ def start_scheduler(cfg: AppConfig) -> None:
         name="MLS Scan Cycle",
         next_run_time=datetime.now(),  # Run immediately on start
     )
+
+    # Add digest job if configured
+    if cfg.alerts.digest.enabled and "email" in cfg.alerts.channels:
+        from apscheduler.triggers.cron import CronTrigger
+
+        hour, minute = cfg.alerts.digest.time.split(":")
+        if cfg.alerts.digest.schedule == "daily":
+            trigger = CronTrigger(hour=int(hour), minute=int(minute))
+        else:  # weekly
+            trigger = CronTrigger(day_of_week="mon", hour=int(hour), minute=int(minute))
+
+        scheduler.add_job(
+            _run_digest_sync,
+            trigger=trigger,
+            args=[cfg],
+            id="digest_email",
+            name="Deal Digest Email",
+        )
+        logger.info("Digest email scheduled: %s at %s", cfg.alerts.digest.schedule, cfg.alerts.digest.time)
 
     logger.info(
         "Scheduler started. Scanning every %d minutes.",

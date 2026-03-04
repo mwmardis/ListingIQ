@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # type: ignore[no-redef]
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +59,7 @@ class CashFlowConfig(BaseModel):
     maintenance_pct: float = 0.01
     annual_insurance: float = 1800.0
     min_monthly_cash_flow: float = 200.0
-    min_cap_rate: float = 6.0
+    min_cap_rate: float = 5.0
 
 
 class FlipConfig(BaseModel):
@@ -91,6 +99,10 @@ class OfferConfig(BaseModel):
     cash_flow_target_coc: float = 8.0
     brrr_target_coc: float = 10.0
     flip_target_profit: float = 30_000.0
+    # Days-on-market discount tiers
+    dom_discount_30_60: float = 0.02
+    dom_discount_60_90: float = 0.05
+    dom_discount_90_plus: float = 0.08
     # Binary search parameters
     max_iterations: int = 50
     price_tolerance: float = 500.0  # stop when within $500
@@ -125,12 +137,20 @@ class WebhookConfig(BaseModel):
     urls: list[str] = []
 
 
+class DigestConfig(BaseModel):
+    enabled: bool = False
+    schedule: str = "daily"  # "daily" or "weekly"
+    time: str = "08:00"
+    min_score: int = 70
+
+
 class AlertsConfig(BaseModel):
     channels: list[str] = ["console"]
     min_deal_score: int = 70
     email: EmailConfig = EmailConfig()
     sms: SMSConfig = SMSConfig()
     webhook: WebhookConfig = WebhookConfig()
+    digest: DigestConfig = DigestConfig()
 
 
 class DatabaseConfig(BaseModel):

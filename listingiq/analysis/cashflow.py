@@ -54,6 +54,13 @@ class CashFlowAnalyzer:
             monthly_rent = rent_estimate
         else:
             monthly_rent = purchase_price * self.cfg.rent_estimate_pct
+
+        # Multi-family: multiply per-unit rent by unit count
+        if listing.units > 1 and rent_estimate is None:
+            per_unit_sqft = listing.sqft / listing.units if listing.sqft else 0
+            per_unit_rent = per_unit_sqft * 1.10 if per_unit_sqft else purchase_price * self.cfg.rent_estimate_pct / listing.units
+            monthly_rent = per_unit_rent * listing.units
+
         effective_rent = monthly_rent * (1 - self.cfg.vacancy_rate)
 
         # Expenses
@@ -129,17 +136,29 @@ class CashFlowAnalyzer:
     def _score(self, m: CashFlowMetrics) -> float:
         score = 0.0
 
-        # Monthly cash flow (up to 35 points)
+        # Monthly cash flow (up to 25 points)
         if m.monthly_cash_flow >= 500:
-            score += 35
-        elif m.monthly_cash_flow >= 300:
             score += 25
-        elif m.monthly_cash_flow >= 200:
+        elif m.monthly_cash_flow >= 300:
             score += 18
+        elif m.monthly_cash_flow >= 200:
+            score += 13
         elif m.monthly_cash_flow >= 100:
-            score += 10
+            score += 7
         elif m.monthly_cash_flow > 0:
-            score += 5
+            score += 3
+
+        # Cash flow efficiency — cash flow per dollar invested (up to 10 points)
+        if m.down_payment > 0:
+            monthly_per_dollar = m.monthly_cash_flow / m.down_payment * 1000
+            if monthly_per_dollar >= 15:
+                score += 10
+            elif monthly_per_dollar >= 10:
+                score += 7
+            elif monthly_per_dollar >= 5:
+                score += 4
+            elif monthly_per_dollar > 0:
+                score += 2
 
         # Cap rate (up to 25 points)
         if m.cap_rate >= 10:

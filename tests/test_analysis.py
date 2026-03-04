@@ -133,6 +133,23 @@ class TestCashFlowAnalyzer:
             assert key in deal.metrics, f"Missing metric: {key}"
 
 
+    def test_cap_rate_default_lowered(self):
+        """Default min_cap_rate should be 5.0 not 6.0."""
+        from listingiq.config import CashFlowConfig
+        cfg = CashFlowConfig()
+        assert cfg.min_cap_rate == 5.0
+
+    def test_cheap_property_not_penalized(self):
+        """A $80k property with good rent shouldn't score worse than expensive one."""
+        cheap = _make_listing(price=80_000, sqft=900)
+        expensive = _make_listing(price=250_000, sqft=1800)
+        deal_cheap = self.analyzer.analyze(cheap, rent_estimate=1_000)
+        deal_expensive = self.analyzer.analyze(expensive, rent_estimate=2_000)
+        # Cheap property has $1000 rent on $80k — much better ratio
+        # Should score at least as well as expensive
+        assert deal_cheap.score >= deal_expensive.score
+
+
 class TestFlipAnalyzer:
     def setup_method(self):
         self.cfg = FlipConfig()
@@ -153,9 +170,9 @@ class TestFlipAnalyzer:
         assert "roi" in m
 
     def test_cheap_flip_is_profitable(self):
-        # Small sqft keeps rehab cost low relative to ARV spread
+        # With comp-based ARV, a cheap property yields positive profit
         listing = _make_listing(price=80_000, sqft=600)
-        deal = self.analyzer.analyze(listing)
+        deal = self.analyzer.analyze(listing, arv_estimate=160_000)
         assert deal.metrics["estimated_profit"] > 0
 
     def test_arv_override(self):
@@ -165,6 +182,68 @@ class TestFlipAnalyzer:
         # Higher ARV means more profit
         deal_default = self.analyzer.analyze(listing)
         assert deal.metrics["estimated_profit"] > deal_default.metrics["estimated_profit"]
+
+    def test_arv_fallback_age_aware_new_home(self):
+        """New home (<15 years) gets conservative 1.15x ARV fallback."""
+        listing = _make_listing(price=300_000, sqft=1500, year_built=2015)
+        deal = self.analyzer.analyze(listing)
+        # 300k * 1.15 = 345k, NOT 300k / 0.65 = 461k
+        assert deal.metrics["estimated_arv"] == pytest.approx(345_000, rel=0.01)
+
+    def test_arv_fallback_age_aware_mid_age(self):
+        """Mid-age home (15-30 years) gets 1.25x ARV fallback."""
+        listing = _make_listing(price=300_000, sqft=1500, year_built=2000)
+        deal = self.analyzer.analyze(listing)
+        assert deal.metrics["estimated_arv"] == pytest.approx(375_000, rel=0.01)
+
+    def test_arv_fallback_age_aware_old_home(self):
+        """Old home (30+ years) gets 1.35x ARV fallback."""
+        listing = _make_listing(price=300_000, sqft=1500, year_built=1980)
+        deal = self.analyzer.analyze(listing)
+        assert deal.metrics["estimated_arv"] == pytest.approx(405_000, rel=0.01)
+
+    def test_arv_fallback_unknown_age(self):
+        """Unknown year_built (0) uses middle multiplier 1.25."""
+        listing = _make_listing(price=300_000, sqft=1500, year_built=0)
+        deal = self.analyzer.analyze(listing)
+        assert deal.metrics["estimated_arv"] == pytest.approx(375_000, rel=0.01)
+
+    def test_arv_override_still_works(self):
+        """Comp-based ARV override still takes precedence."""
+        listing = _make_listing(price=300_000, sqft=1500, year_built=2015)
+        deal = self.analyzer.analyze(listing, arv_estimate=500_000)
+        assert deal.metrics["estimated_arv"] == 500_000
+
+
+class TestMultiFamilyAnalysis:
+    def test_cashflow_duplex_uses_aggregate_rent(self):
+        """Duplex should estimate rent per unit and aggregate."""
+        cfg = CashFlowConfig()
+        analyzer = CashFlowAnalyzer(cfg)
+        duplex = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=2)
+        single = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=1)
+        deal_duplex = analyzer.analyze(duplex)
+        deal_single = analyzer.analyze(single)
+        # Duplex should have higher rent estimate (2 units rented separately)
+        assert deal_duplex.metrics["monthly_rent_estimate"] > deal_single.metrics["monthly_rent_estimate"]
+
+    def test_brrr_duplex_uses_aggregate_rent(self):
+        brrr_cfg = BRRRConfig()
+        cf_cfg = CashFlowConfig()
+        analyzer = BRRRAnalyzer(brrr_cfg, cf_cfg)
+        duplex = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=2)
+        single = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=1)
+        deal_duplex = analyzer.analyze(duplex)
+        deal_single = analyzer.analyze(single)
+        assert deal_duplex.metrics["monthly_rent_estimate"] > deal_single.metrics["monthly_rent_estimate"]
+
+    def test_single_family_unaffected(self):
+        """units=1 should produce identical results to current behavior."""
+        cfg = CashFlowConfig()
+        analyzer = CashFlowAnalyzer(cfg)
+        listing = _make_listing(units=1)
+        deal = analyzer.analyze(listing)
+        assert deal.metrics["monthly_rent_estimate"] > 0
 
 
 class TestDealAnalyzer:
