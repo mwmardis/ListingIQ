@@ -1663,7 +1663,7 @@ def _dashboard_html() -> str:
 
             container.innerHTML = data.offers.map((o, i) => {
                 const strat = o.strategy.replace('_', ' ');
-                const discount = (o.discount_from_list * 100).toFixed(1);
+                const discount = o.discount_from_list.toFixed(1);
                 const metricsHtml = o.metrics_at_offer ? Object.entries(o.metrics_at_offer).map(([k, v]) =>
                     `<div class="metric-cell">
                         <div class="metric-label">${prettyLabel(k)}</div>
