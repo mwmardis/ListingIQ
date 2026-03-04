@@ -205,7 +205,18 @@ class OfferCalculator:
         if arv_estimate:
             estimated_arv = arv_estimate
         else:
-            estimated_arv = listing.price / self.config.flip.max_purchase_pct_of_arv
+            # Age-aware ARV fallback (conservative)
+            if listing.year_built > 0:
+                age = 2026 - listing.year_built
+                if age < 15:
+                    multiplier = 1.15
+                elif age < 30:
+                    multiplier = 1.25
+                else:
+                    multiplier = 1.35
+            else:
+                multiplier = 1.25  # default for unknown age
+            estimated_arv = listing.price * multiplier
 
         # Calculate costs
         rehab_per_sqft = 35.0

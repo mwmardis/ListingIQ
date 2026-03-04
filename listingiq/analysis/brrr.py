@@ -52,7 +52,18 @@ class BRRRAnalyzer:
         if arv_estimate is not None:
             estimated_arv = arv_estimate
         else:
-            estimated_arv = purchase_price / self.cfg.max_purchase_pct_of_arv
+            # Age-aware ARV fallback (conservative)
+            if listing.year_built > 0:
+                age = 2026 - listing.year_built
+                if age < 15:
+                    multiplier = 1.15
+                elif age < 30:
+                    multiplier = 1.25
+                else:
+                    multiplier = 1.35
+            else:
+                multiplier = 1.25  # default for unknown age
+            estimated_arv = purchase_price * multiplier
 
         # Rehab cost based on square footage
         rehab_cost = listing.sqft * self.cfg.rehab_cost_per_sqft if listing.sqft else 25_000.0
