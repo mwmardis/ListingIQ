@@ -106,6 +106,10 @@ cash_flow_target_monthly = 200.0
 cash_flow_target_coc = 8.0
 brrr_target_coc = 10.0
 flip_target_profit = 30000.0
+# Days-on-market discount tiers
+dom_discount_30_60 = 0.02
+dom_discount_60_90 = 0.05
+dom_discount_90_plus = 0.08
 # Binary search precision
 max_iterations = 50
 price_tolerance = 500.0

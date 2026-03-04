@@ -88,6 +88,16 @@ class OfferCalculator:
                 continue
         return results
 
+    def _apply_dom_discount(self, base_price: float, days_on_market: int) -> float:
+        """Apply additional discount based on days on market."""
+        if days_on_market >= 90:
+            return base_price * (1 - self.offer_cfg.dom_discount_90_plus)
+        elif days_on_market >= 60:
+            return base_price * (1 - self.offer_cfg.dom_discount_60_90)
+        elif days_on_market >= 30:
+            return base_price * (1 - self.offer_cfg.dom_discount_30_60)
+        return base_price
+
     def _calc_cashflow_offer(
         self,
         listing: Listing,
@@ -127,12 +137,14 @@ class OfferCalculator:
         final_deal = self._cashflow.analyze(final_listing, rent_estimate=rent_estimate)
 
         discount = ((listing.price - best_price) / listing.price) * 100 if listing.price > 0 else 0
+        dom_adjusted = self._apply_dom_discount(best_price, listing.days_on_market)
 
         return OfferResult(
             strategy=DealStrategy.CASH_FLOW,
             target_metric=metric,
             target_value=target,
             max_offer_price=round(best_price, 0),
+            dom_adjusted_price=round(dom_adjusted, 0),
             metrics_at_offer=final_deal.metrics,
             discount_from_list=round(discount, 1),
         )
@@ -176,12 +188,14 @@ class OfferCalculator:
         )
 
         discount = ((listing.price - best_price) / listing.price) * 100 if listing.price > 0 else 0
+        dom_adjusted = self._apply_dom_discount(best_price, listing.days_on_market)
 
         return OfferResult(
             strategy=DealStrategy.BRRR,
             target_metric=metric,
             target_value=target,
             max_offer_price=round(best_price, 0),
+            dom_adjusted_price=round(dom_adjusted, 0),
             metrics_at_offer=final_deal.metrics,
             discount_from_list=round(discount, 1),
         )
@@ -233,12 +247,14 @@ class OfferCalculator:
         final_deal = self._flip.analyze(final_listing, arv_estimate=arv_estimate)
 
         discount = ((listing.price - max_offer) / listing.price) * 100 if listing.price > 0 else 0
+        dom_adjusted = self._apply_dom_discount(max_offer, listing.days_on_market)
 
         return OfferResult(
             strategy=DealStrategy.FLIP,
             target_metric=metric,
             target_value=target_profit,
             max_offer_price=round(max_offer, 0),
+            dom_adjusted_price=round(dom_adjusted, 0),
             metrics_at_offer=final_deal.metrics,
             discount_from_list=round(discount, 1),
         )

@@ -189,6 +189,7 @@ class OfferResult(BaseModel):
     target_metric: str
     target_value: float
     max_offer_price: float
+    dom_adjusted_price: float = 0.0
     metrics_at_offer: dict = Field(default_factory=dict)
     discount_from_list: float = 0.0  # percentage below list price
 

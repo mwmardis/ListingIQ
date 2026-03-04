@@ -133,3 +133,23 @@ class TestOfferCalculator:
         result = self.calc.calculate_offer_price(listing, strategy="cash_flow")
         expected_discount = ((listing.price - result.max_offer_price) / listing.price) * 100
         assert result.discount_from_list == pytest.approx(expected_discount, abs=1.0)
+
+    def test_dom_adjustment_no_effect_fresh(self):
+        """DOM < 30 has no adjustment."""
+        listing = _make_listing(price=200_000, days_on_market=10)
+        result = self.calc.calculate_offer_price(listing, strategy="cash_flow")
+        assert result.dom_adjusted_price == result.max_offer_price
+
+    def test_dom_adjustment_30_60(self):
+        """DOM 31-60 applies 2% additional discount."""
+        listing = _make_listing(price=200_000, days_on_market=45)
+        result = self.calc.calculate_offer_price(listing, strategy="cash_flow")
+        expected = result.max_offer_price * (1 - 0.02)
+        assert result.dom_adjusted_price == pytest.approx(expected, rel=0.01)
+
+    def test_dom_adjustment_90_plus(self):
+        """DOM 90+ applies 8% additional discount."""
+        listing = _make_listing(price=200_000, days_on_market=120)
+        result = self.calc.calculate_offer_price(listing, strategy="cash_flow")
+        expected = result.max_offer_price * (1 - 0.08)
+        assert result.dom_adjusted_price == pytest.approx(expected, rel=0.01)

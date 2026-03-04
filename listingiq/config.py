@@ -99,6 +99,10 @@ class OfferConfig(BaseModel):
     cash_flow_target_coc: float = 8.0
     brrr_target_coc: float = 10.0
     flip_target_profit: float = 30_000.0
+    # Days-on-market discount tiers
+    dom_discount_30_60: float = 0.02
+    dom_discount_60_90: float = 0.05
+    dom_discount_90_plus: float = 0.08
     # Binary search parameters
     max_iterations: int = 50
     price_tolerance: float = 500.0  # stop when within $500
