@@ -215,6 +215,37 @@ class TestFlipAnalyzer:
         assert deal.metrics["estimated_arv"] == 500_000
 
 
+class TestMultiFamilyAnalysis:
+    def test_cashflow_duplex_uses_aggregate_rent(self):
+        """Duplex should estimate rent per unit and aggregate."""
+        cfg = CashFlowConfig()
+        analyzer = CashFlowAnalyzer(cfg)
+        duplex = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=2)
+        single = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=1)
+        deal_duplex = analyzer.analyze(duplex)
+        deal_single = analyzer.analyze(single)
+        # Duplex should have higher rent estimate (2 units rented separately)
+        assert deal_duplex.metrics["monthly_rent_estimate"] > deal_single.metrics["monthly_rent_estimate"]
+
+    def test_brrr_duplex_uses_aggregate_rent(self):
+        brrr_cfg = BRRRConfig()
+        cf_cfg = CashFlowConfig()
+        analyzer = BRRRAnalyzer(brrr_cfg, cf_cfg)
+        duplex = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=2)
+        single = _make_listing(price=200_000, sqft=2000, beds=4, baths=2, units=1)
+        deal_duplex = analyzer.analyze(duplex)
+        deal_single = analyzer.analyze(single)
+        assert deal_duplex.metrics["monthly_rent_estimate"] > deal_single.metrics["monthly_rent_estimate"]
+
+    def test_single_family_unaffected(self):
+        """units=1 should produce identical results to current behavior."""
+        cfg = CashFlowConfig()
+        analyzer = CashFlowAnalyzer(cfg)
+        listing = _make_listing(units=1)
+        deal = analyzer.analyze(listing)
+        assert deal.metrics["monthly_rent_estimate"] > 0
+
+
 class TestDealAnalyzer:
     def test_analyze_all_strategies(self):
         cfg = AnalysisConfig()

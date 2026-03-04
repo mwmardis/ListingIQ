@@ -54,6 +54,13 @@ class CashFlowAnalyzer:
             monthly_rent = rent_estimate
         else:
             monthly_rent = purchase_price * self.cfg.rent_estimate_pct
+
+        # Multi-family: multiply per-unit rent by unit count
+        if listing.units > 1 and rent_estimate is None:
+            per_unit_sqft = listing.sqft / listing.units if listing.sqft else 0
+            per_unit_rent = per_unit_sqft * 1.10 if per_unit_sqft else purchase_price * self.cfg.rent_estimate_pct / listing.units
+            monthly_rent = per_unit_rent * listing.units
+
         effective_rent = monthly_rent * (1 - self.cfg.vacancy_rate)
 
         # Expenses

@@ -86,6 +86,12 @@ class BRRRAnalyzer:
         else:
             monthly_rent_arv = estimated_arv * self.cf_cfg.rent_estimate_pct
 
+        # Multi-family: multiply per-unit rent by unit count
+        if listing.units > 1 and rent_estimate is None:
+            per_unit_sqft = listing.sqft / listing.units if listing.sqft else 0
+            per_unit_rent = per_unit_sqft * 1.10 if per_unit_sqft else estimated_arv * self.cf_cfg.rent_estimate_pct / listing.units
+            monthly_rent_arv = per_unit_rent * listing.units
+
         # Monthly expenses on the refinanced property
         monthly_mortgage = self._monthly_payment(
             refinance_amount, self.cf_cfg.interest_rate, self.cf_cfg.loan_term_years
