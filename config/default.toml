@@ -138,5 +138,11 @@ to_numbers = []
 [alerts.webhook]
 urls = []
 
+[alerts.digest]
+enabled = false
+schedule = "daily"
+time = "08:00"
+min_score = 70
+
 [database]
 url = "sqlite:///listingiq.db"

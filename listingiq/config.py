@@ -137,12 +137,20 @@ class WebhookConfig(BaseModel):
     urls: list[str] = []
 
 
+class DigestConfig(BaseModel):
+    enabled: bool = False
+    schedule: str = "daily"  # "daily" or "weekly"
+    time: str = "08:00"
+    min_score: int = 70
+
+
 class AlertsConfig(BaseModel):
     channels: list[str] = ["console"]
     min_deal_score: int = 70
     email: EmailConfig = EmailConfig()
     sms: SMSConfig = SMSConfig()
     webhook: WebhookConfig = WebhookConfig()
+    digest: DigestConfig = DigestConfig()
 
 
 class DatabaseConfig(BaseModel):

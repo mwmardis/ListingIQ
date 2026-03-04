@@ -126,6 +126,16 @@ class Repository:
         with self._session() as session:
             return session.query(ListingRow).get(listing_id)
 
+    def get_deals_since(self, since: datetime, min_score: float = 0) -> list:
+        """Get deals analyzed after a given timestamp."""
+        with self._session() as session:
+            return (
+                session.query(DealRow)
+                .filter(DealRow.analyzed_at >= since, DealRow.score >= min_score)
+                .order_by(DealRow.score.desc())
+                .all()
+            )
+
     def listing_exists(self, source: str, source_id: str) -> bool:
         """Check if we've already seen this listing."""
         with self._session() as session:
