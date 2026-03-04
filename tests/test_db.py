@@ -1,8 +1,5 @@
 """Tests for database repository."""
 
-import os
-import tempfile
-
 import pytest
 
 from listingiq.models import Listing, DealAnalysis, DealStrategy
@@ -10,13 +7,10 @@ from listingiq.db.repository import Repository
 
 
 @pytest.fixture
-def repo():
+def repo(tmp_path):
     """Create a temporary database for testing."""
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    r = Repository(f"sqlite:///{path}")
-    yield r
-    os.unlink(path)
+    db_url = f"sqlite:///{tmp_path / 'test.db'}"
+    return Repository(db_url)
 
 
 def _make_listing(**overrides) -> Listing:
@@ -77,3 +71,24 @@ def test_save_and_get_deals(repo):
     top = repo.get_top_deals(limit=10)
     assert len(top) >= 1
     assert top[0].score == 85.0
+
+
+def test_upsert_listing_with_new_fields(repo):
+    """New fields (units, has_pool, etc.) are stored and retrievable."""
+    listing = _make_listing(
+        source_id="new-fields-1",
+        units=2,
+        has_pool=True,
+        stories=2,
+        school_rating=8.0,
+        flood_zone="X",
+        crime_score=2.5,
+    )
+    row_id = repo.upsert_listing(listing)
+    row = repo.get_listing_by_id(row_id)
+    assert row.units == 2
+    assert row.has_pool is True
+    assert row.stories == 2
+    assert row.school_rating == 8.0
+    assert row.flood_zone == "X"
+    assert row.crime_score == 2.5
