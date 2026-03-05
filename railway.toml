@@ -1,0 +1,11 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python -m uvicorn listingiq.api.server:app --host 0.0.0.0 --port ${PORT:-8000}"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+
+# NOTE: After first deploy, add a Railway Volume mounted at /data
+# Then set DATABASE_URL=sqlite:////data/listingiq.db in Railway env vars
+# This persists your SQLite database across deploys

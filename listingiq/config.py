@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 if sys.version_info >= (3, 11):
@@ -193,4 +194,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             overrides = tomllib.load(f)
         data = _deep_merge(data, overrides)
 
-    return AppConfig(**data)
+    cfg = AppConfig(**data)
+
+    # Allow DATABASE_URL env var to override config (for Railway, etc.)
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        cfg.database.url = db_url
+
+    return cfg

@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
-from listingiq.config import AppConfig
+from listingiq.config import AppConfig, load_config
 from listingiq.models import Listing
 from listingiq.analysis.engine import DealAnalyzer
 from listingiq.analysis.offer import OfferCalculator
@@ -1706,3 +1706,7 @@ def _dashboard_html() -> str:
 </script>
 </body>
 </html>"""
+
+
+# Module-level app instance for uvicorn (e.g. Railway deployment)
+app = create_app(load_config())
