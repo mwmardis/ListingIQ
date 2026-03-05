@@ -4,7 +4,7 @@ MLS deal alert system for real estate investors. Scrapes property listings from 
 
 ## Features
 
-- **Multi-source scraping** — Redfin, Zillow, Realtor.com
+- **Zillow scraping** — automatically searches and analyzes listings
 - **Three analysis strategies:**
   - **BRRR** (Buy, Rehab, Rent, Refinance, Repeat) — scores based on cash-on-cash return, equity capture, and cash left in deal
   - **Cash Flow** — evaluates cap rate, DSCR, monthly cash flow, GRM
@@ -26,7 +26,7 @@ pip install -e ".[dev]"
 listingiq analyze "123 Main St" --price 200000 --sqft 1500 --beds 3 --baths 2
 
 # Scan a market for deals
-listingiq scan --market "Austin, TX" --source redfin
+listingiq scan --market "Austin, TX" --source zillow
 
 # Start the web dashboard
 listingiq serve
@@ -80,7 +80,7 @@ See `config/default.toml` for all available parameters.
 
 ```
 --market, -m    Target market (e.g., "Austin, TX")
---source, -s    Scraper source (redfin, zillow, realtor)
+--source, -s    Scraper source (zillow)
 --strategy      Only run specific strategy (brrr, cash_flow, flip)
 --min-score     Minimum deal score to display (0-100)
 --limit, -l     Max number of deals to show

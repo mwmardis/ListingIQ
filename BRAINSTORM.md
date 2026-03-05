@@ -12,7 +12,7 @@ The current analysis relies on rule-of-thumb estimates (rent at 0.8% of price, r
 Pull actual rental comps instead of estimating rent as 0.8% of property value. Sources: Zillow Rent Zestimates API, Rentometer, HUD Fair Market Rents, or scraping Craigslist/Apartments.com for nearby listings with matching bed/bath counts. A bad rent estimate can flip a deal from "great" to "money pit" — this is the #1 accuracy bottleneck.
 
 ### Comparable Sales Engine
-Pull recent sold comps (last 6 months, within 0.5 mi, similar sqft/beds/baths) to calculate ARV instead of using a percentage multiplier. Redfin and Zillow both expose sold data. This directly improves BRRR and flip scoring since ARV drives the entire analysis.
+Pull recent sold comps (last 6 months, within 0.5 mi, similar sqft/beds/baths) to calculate ARV instead of using a percentage multiplier. Zillow exposes sold data. This directly improves BRRR and flip scoring since ARV drives the entire analysis.
 
 ### Actual Property Tax Lookup
 Scrape county assessor/tax records for real tax amounts. The current system doesn't factor in property taxes for some strategies, and tax rates vary wildly — $2k/yr in Texas vs $12k/yr in New Jersey for the same price point changes everything.

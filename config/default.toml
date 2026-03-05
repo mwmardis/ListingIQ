@@ -2,8 +2,8 @@
 # Copy to config/local.toml and customize for your setup
 
 [scraper]
-# Sources to scrape: "redfin", "zillow", "realtor"
-sources = ["redfin"]
+# Source to scrape: "zillow"
+sources = ["zillow"]
 # How often to scrape (minutes)
 interval_minutes = 60
 # Max concurrent requests

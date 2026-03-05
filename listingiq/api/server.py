@@ -1245,8 +1245,6 @@ def _dashboard_html() -> str:
                         <label>Source</label>
                         <select id="source">
                             <option value="zillow">Zillow</option>
-                            <option value="redfin">Redfin</option>
-                            <option value="realtor">Realtor.com</option>
                         </select>
                     </div>
                     <div class="field">

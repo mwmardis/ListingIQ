@@ -51,7 +51,7 @@ class UnitMix(BaseModel):
     estimated_rent: float = 0.0
 ```
 
-Scraper changes: extract pool, school rating, flood zone, crime, stories, unit count from Redfin/Zillow/Realtor API responses where available. Fields default to `None` when data unavailable.
+Scraper changes: extract pool, school rating, flood zone, crime, stories, unit count from Zillow API responses where available. Fields default to `None` when data unavailable.
 
 ### 1.3 Small Multi-Family Analysis (2-4 Units)
 
