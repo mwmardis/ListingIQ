@@ -1,10 +1,10 @@
 """MLS data scrapers for various sources."""
 
 from listingiq.scrapers.base import BaseScraper
-from listingiq.scrapers.rentcast import RentcastScraper
+from listingiq.scrapers.repliers import RepliersScraper
 
 SCRAPERS: dict[str, type[BaseScraper]] = {
-    "rentcast": RentcastScraper,
+    "repliers": RepliersScraper,
 }
 
 
