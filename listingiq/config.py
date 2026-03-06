@@ -35,7 +35,7 @@ class SearchConfig(BaseModel):
 
 
 class ScraperConfig(BaseModel):
-    sources: list[str] = ["zillow"]
+    sources: list[str] = ["rentcast"]
     interval_minutes: int = 60
     max_concurrency: int = 5
     delay_min: float = 1.0

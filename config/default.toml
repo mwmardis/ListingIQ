@@ -2,8 +2,8 @@
 # Copy to config/local.toml and customize for your setup
 
 [scraper]
-# Source to scrape: "zillow"
-sources = ["zillow"]
+# Source to scrape: "rentcast"
+sources = ["rentcast"]
 # How often to scrape (minutes)
 interval_minutes = 60
 # Max concurrent requests
