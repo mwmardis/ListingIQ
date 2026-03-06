@@ -1710,3 +1710,9 @@ def _dashboard_html() -> str:
 
 # Module-level app instance for uvicorn (e.g. Railway deployment)
 app = create_app(load_config())
+
+if __name__ == "__main__":
+    import os
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
