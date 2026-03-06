@@ -18,7 +18,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-CONFIG_DIR = Path(__file__).parent.parent / "config"
+_PACKAGE_CONFIG_DIR = Path(__file__).parent.parent / "config"
+_CWD_CONFIG_DIR = Path.cwd() / "config"
+CONFIG_DIR = _PACKAGE_CONFIG_DIR if _PACKAGE_CONFIG_DIR.exists() else _CWD_CONFIG_DIR
 
 
 class SearchConfig(BaseModel):
