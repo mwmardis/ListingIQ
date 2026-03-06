@@ -24,7 +24,7 @@ CONFIG_DIR = _PACKAGE_CONFIG_DIR if _PACKAGE_CONFIG_DIR.exists() else _CWD_CONFI
 
 
 class SearchConfig(BaseModel):
-    markets: list[str] = ["Austin, TX"]
+    markets: list[str] = ["Houston, TX"]
     property_types: list[str] = ["single_family", "multi_family"]
     min_price: int = 50_000
     max_price: int = 500_000
@@ -35,7 +35,7 @@ class SearchConfig(BaseModel):
 
 
 class ScraperConfig(BaseModel):
-    sources: list[str] = ["rentcast"]
+    sources: list[str] = ["repliers"]
     interval_minutes: int = 60
     max_concurrency: int = 5
     delay_min: float = 1.0
@@ -204,8 +204,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     if db_url:
         cfg.database.url = db_url
 
-    rentcast_key = os.environ.get("RENTCAST_API_KEY")
-    if rentcast_key:
-        cfg.scraper.api_key = rentcast_key
+    repliers_key = os.environ.get("REPLIERS_API_KEY")
+    if repliers_key:
+        cfg.scraper.api_key = repliers_key
 
     return cfg

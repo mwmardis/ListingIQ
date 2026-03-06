@@ -2,8 +2,8 @@
 # Copy to config/local.toml and customize for your setup
 
 [scraper]
-# Source to scrape: "rentcast"
-sources = ["rentcast"]
+# Source to scrape: "repliers"
+sources = ["repliers"]
 # How often to scrape (minutes)
 interval_minutes = 60
 # Max concurrent requests
@@ -14,7 +14,7 @@ delay_max = 3.0
 
 [scraper.search]
 # Target markets (city, state)
-markets = ["Austin, TX"]
+markets = ["Houston, TX"]
 # Property types: "single_family", "multi_family", "condo", "townhouse"
 property_types = ["single_family", "multi_family"]
 # Price range
