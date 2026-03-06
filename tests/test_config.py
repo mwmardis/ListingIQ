@@ -30,3 +30,16 @@ def test_config_deep_merge():
     override = {"a": {"b": 10}, "e": 5}
     result = _deep_merge(base, override)
     assert result == {"a": {"b": 10, "c": 2}, "d": 3, "e": 5}
+
+
+def test_scraper_config_has_api_key():
+    from listingiq.config import ScraperConfig
+    cfg = ScraperConfig()
+    assert cfg.api_key == ""
+
+
+def test_rentcast_api_key_env_override(monkeypatch):
+    monkeypatch.setenv("RENTCAST_API_KEY", "test-key-123")
+    from listingiq.config import load_config
+    cfg = load_config()
+    assert cfg.scraper.api_key == "test-key-123"

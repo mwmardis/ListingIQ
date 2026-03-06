@@ -40,6 +40,7 @@ class ScraperConfig(BaseModel):
     max_concurrency: int = 5
     delay_min: float = 1.0
     delay_max: float = 3.0
+    api_key: str = ""
     search: SearchConfig = SearchConfig()
 
 
@@ -202,5 +203,9 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
         cfg.database.url = db_url
+
+    rentcast_key = os.environ.get("RENTCAST_API_KEY")
+    if rentcast_key:
+        cfg.scraper.api_key = rentcast_key
 
     return cfg
