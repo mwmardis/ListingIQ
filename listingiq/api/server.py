@@ -1239,12 +1239,12 @@ def _dashboard_html() -> str:
                 <div class="form-grid">
                     <div class="field" style="grid-column: span 2;">
                         <label>Market</label>
-                        <input type="text" id="market" placeholder="Austin, TX" value="Austin, TX">
+                        <input type="text" id="market" placeholder="Houston, TX" value="Houston, TX">
                     </div>
                     <div class="field">
                         <label>Source</label>
                         <select id="source">
-                            <option value="rentcast">Rentcast</option>
+                            <option value="repliers">Repliers</option>
                         </select>
                     </div>
                     <div class="field">
