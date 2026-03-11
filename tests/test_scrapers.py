@@ -1,217 +1,289 @@
-"""Tests for scraper registry and RepliersScraper."""
-from unittest.mock import AsyncMock, MagicMock
+"""Tests for scraper registry and ZillowScraper."""
+
+from unittest.mock import MagicMock
 
 import pytest
 
 from listingiq.config import ScraperConfig, SearchConfig
-from listingiq.models import PropertyType, ListingStatus
-from listingiq.scrapers.repliers import RepliersScraper
+from listingiq.models import ListingStatus, PropertyType
+from listingiq.scrapers import SCRAPERS, get_scraper
+from listingiq.scrapers.zillow import ZillowScraper
 
 
-# ── Sample API Response ──
+# ── Sample Zillow listing data ──
 
 SAMPLE_LISTING = {
-    "mlsNumber": "H1234567",
-    "resource": "Property",
-    "status": "A",
-    "class": "residential",
-    "type": "sale",
-    "listPrice": "350000",
-    "listDate": "2025-01-15T00:00:00Z",
-    "lastStatus": "New",
-    "soldPrice": None,
-    "soldDate": None,
-    "originalPrice": "360000",
-    "address": {
-        "area": "Houston",
-        "city": "Houston",
-        "country": "US",
-        "district": "Downtown",
-        "neighborhood": "Midtown",
-        "streetDirection": "",
-        "streetName": "Main",
-        "streetNumber": "123",
-        "streetSuffix": "St",
-        "unitNumber": None,
-        "zip": "77001",
-        "state": "Texas",
+    "zpid": "12345678",
+    "detailUrl": "/homedetails/123-Main-St/12345678_zpid/",
+    "addressStreet": "123 Main St",
+    "addressZipcode": "77001",
+    "unformattedPrice": 350000,
+    "beds": 3,
+    "baths": 2.0,
+    "area": 1500,
+    "latLong": {
+        "latitude": 29.7604,
+        "longitude": -95.3698,
     },
-    "map": {
-        "latitude": "29.7604",
-        "longitude": "-95.3698",
-    },
-    "details": {
-        "numBedrooms": "3",
-        "numBedroomsPlus": None,
-        "numBathrooms": "2",
-        "sqft": "1500",
-        "propertyType": "Detached",
-        "style": "2-Storey",
-        "yearBuilt": "1990",
-        "numGarageSpaces": "2",
-        "numParkingSpaces": "4",
-    },
-    "lot": {
-        "acres": "0.25",
-        "depth": "100",
-        "width": "50",
-        "size": None,
-    },
-    "condominium": {
-        "fees": {
-            "maintenance": "50",
+    "hdpData": {
+        "homeInfo": {
+            "homeType": "SINGLE_FAMILY",
         },
     },
-    "taxes": {
-        "annualAmount": "4500",
+    "statusType": "FOR_SALE",
+    "variableData": {
+        "daysOnZillow": 45,
     },
-    "daysOnMarket": "45",
-    "images": [
-        "https://cdn.repliers.io/image1.jpg",
-        "https://cdn.repliers.io/image2.jpg",
-    ],
-    "photoCount": 2,
 }
 
 
-# ── RepliersScraper Tests ──
+# ── Registry Tests ──
 
 
-class TestRepliersScraper:
-    def _make_scraper(self, api_key="test-key"):
-        cfg = ScraperConfig(
-            api_key=api_key,
-            search=SearchConfig(markets=["Houston, TX"]),
-        )
-        return RepliersScraper(cfg)
+class TestScraperRegistry:
+    def test_zillow_registered(self):
+        assert "zillow" in SCRAPERS
+        assert SCRAPERS["zillow"] is ZillowScraper
 
-    def test_init_sets_api_key(self):
-        scraper = self._make_scraper("my-key")
-        assert scraper.api_key == "my-key"
+    def test_get_scraper_zillow(self):
+        cls = get_scraper("zillow")
+        assert cls is ZillowScraper
 
-    def test_build_params_basic(self):
+    def test_get_scraper_unknown_raises(self):
+        with pytest.raises(ValueError, match="Unknown scraper"):
+            get_scraper("nonexistent")
+
+
+# ── ZillowScraper Tests ──
+
+
+class TestZillowScraper:
+    def _make_scraper(self):
+        cfg = ScraperConfig(search=SearchConfig(markets=["Houston, TX"]))
+        return ZillowScraper(cfg)
+
+    def test_source_name(self):
+        scraper = self._make_scraper()
+        assert scraper.SOURCE_NAME == "zillow"
+
+    def test_build_search_params(self):
         scraper = self._make_scraper()
         params = scraper._build_search_params("Houston, TX")
-        assert params["city"] == "Houston"
-        assert params["state"] == "TX"
-        assert params["status"] == "A"
-        assert params["resultsPerPage"] == 500
+        assert "searchQueryState" in params
+        assert "wants" in params
+        assert params["requestId"] == 1
 
-    def test_build_params_price_range(self):
-        scraper = self._make_scraper()
-        params = scraper._build_search_params("Houston, TX")
-        assert params["minPrice"] == 50000
-        assert params["maxPrice"] == 500000
+        import json
 
-    def test_build_params_bedrooms(self):
-        scraper = self._make_scraper()
-        params = scraper._build_search_params("Houston, TX")
-        assert params["minBedroomsTotal"] == 2
-        assert params["maxBedroomsTotal"] == 6
+        search_state = json.loads(params["searchQueryState"])
+        assert search_state["usersSearchTerm"] == "Houston, TX"
+        assert search_state["filterState"]["price"]["min"] == 50000
+        assert search_state["filterState"]["price"]["max"] == 500000
+        assert search_state["filterState"]["beds"]["min"] == 2
+        assert search_state["filterState"]["beds"]["max"] == 6
+        assert search_state["filterState"]["baths"]["min"] == 1
 
-    def test_build_params_bathrooms(self):
+    def test_parse_list_results_basic(self):
         scraper = self._make_scraper()
-        params = scraper._build_search_params("Houston, TX")
-        assert params["minBaths"] == 1
-        assert params["maxBaths"] == 4
-
-    def test_build_params_includes_type(self):
-        scraper = self._make_scraper()
-        params = scraper._build_search_params("Houston, TX")
-        assert "sale" in params["type"]
-        assert "lease" in params["type"]
-
-    def test_parse_listings(self):
-        scraper = self._make_scraper()
-        listings = scraper._parse_listings([SAMPLE_LISTING])
+        listings = scraper._parse_list_results([SAMPLE_LISTING], "Houston, TX")
         assert len(listings) == 1
         listing = listings[0]
-        assert listing.source == "repliers"
-        assert listing.source_id == "H1234567"
+        assert listing.source == "zillow"
+        assert listing.source_id == "12345678"
         assert listing.address == "123 Main St"
         assert listing.city == "Houston"
-        assert listing.state == "Texas"
+        assert listing.state == "TX"
         assert listing.zip_code == "77001"
         assert listing.price == 350000.0
         assert listing.beds == 3
         assert listing.baths == 2.0
         assert listing.sqft == 1500
-        assert listing.year_built == 1990
-        assert listing.hoa_monthly == 50.0
-        assert listing.days_on_market == 45
-        assert listing.tax_annual == 4500.0
         assert listing.property_type == PropertyType.SINGLE_FAMILY
         assert listing.status == ListingStatus.ACTIVE
-        assert listing.raw_data["latitude"] == "29.7604"
-        assert listing.raw_data["longitude"] == "-95.3698"
-        assert listing.raw_data["type"] == "sale"
+        assert listing.days_on_market == 45
+        assert listing.url == "https://www.zillow.com/homedetails/123-Main-St/12345678_zpid/"
 
-    def test_parse_listings_lot_sqft_from_acres(self):
+    def test_parse_list_results_raw_data(self):
         scraper = self._make_scraper()
-        listings = scraper._parse_listings([SAMPLE_LISTING])
-        # 0.25 acres * 43560 sqft/acre = 10890
-        assert listings[0].lot_sqft == 10890
+        listings = scraper._parse_list_results([SAMPLE_LISTING], "Houston, TX")
+        assert listings[0].raw_data["zpid"] == "12345678"
+        assert listings[0].raw_data["latitude"] == 29.7604
+        assert listings[0].raw_data["longitude"] == -95.3698
 
-    def test_parse_listings_skips_no_price(self):
-        bad = {**SAMPLE_LISTING, "listPrice": None}
+    def test_parse_list_results_skips_no_price(self):
+        bad = {**SAMPLE_LISTING, "unformattedPrice": 0, "price": 0}
         scraper = self._make_scraper()
-        listings = scraper._parse_listings([bad])
+        listings = scraper._parse_list_results([bad], "Houston, TX")
         assert len(listings) == 0
 
-    def test_parse_listings_handles_missing_fields(self):
+    def test_parse_list_results_string_price(self):
+        item = {**SAMPLE_LISTING, "unformattedPrice": "$275,000"}
+        scraper = self._make_scraper()
+        listings = scraper._parse_list_results([item], "Houston, TX")
+        assert len(listings) == 1
+        assert listings[0].price == 275000.0
+
+    def test_parse_list_results_string_sqft(self):
+        item = {**SAMPLE_LISTING, "area": "1,800"}
+        scraper = self._make_scraper()
+        listings = scraper._parse_list_results([item], "Houston, TX")
+        assert listings[0].sqft == 1800
+
+    def test_parse_list_results_handles_missing_fields(self):
         minimal = {
-            "mlsNumber": "H9999999",
-            "listPrice": "200000",
+            "zpid": "99999999",
+            "unformattedPrice": 200000,
         }
         scraper = self._make_scraper()
-        listings = scraper._parse_listings([minimal])
+        listings = scraper._parse_list_results([minimal], "Austin, TX")
         assert len(listings) == 1
         assert listings[0].price == 200000
         assert listings[0].beds == 0
         assert listings[0].sqft == 0
+        assert listings[0].city == "Austin"
+        assert listings[0].state == "TX"
+
+    def test_parse_list_results_property_types(self):
+        scraper = self._make_scraper()
+        for zillow_type, expected in [
+            ("SINGLE_FAMILY", PropertyType.SINGLE_FAMILY),
+            ("MULTI_FAMILY", PropertyType.MULTI_FAMILY),
+            ("CONDO", PropertyType.CONDO),
+            ("TOWNHOUSE", PropertyType.TOWNHOUSE),
+        ]:
+            item = {**SAMPLE_LISTING}
+            item["hdpData"] = {"homeInfo": {"homeType": zillow_type}}
+            listings = scraper._parse_list_results([item], "Houston, TX")
+            assert listings[0].property_type == expected
+
+    def test_parse_list_results_statuses(self):
+        scraper = self._make_scraper()
+        for zillow_status, expected in [
+            ("FOR_SALE", ListingStatus.ACTIVE),
+            ("PENDING", ListingStatus.PENDING),
+            ("SOLD", ListingStatus.SOLD),
+        ]:
+            item = {**SAMPLE_LISTING, "statusType": zillow_status}
+            listings = scraper._parse_list_results([item], "Houston, TX")
+            assert listings[0].status == expected
+
+    def test_parse_list_results_unknown_status_defaults_active(self):
+        item = {**SAMPLE_LISTING, "statusType": "UNKNOWN"}
+        scraper = self._make_scraper()
+        listings = scraper._parse_list_results([item], "Houston, TX")
+        assert listings[0].status == ListingStatus.ACTIVE
+
+    def test_parse_list_results_absolute_url(self):
+        item = {**SAMPLE_LISTING, "detailUrl": "https://www.zillow.com/full-url/"}
+        scraper = self._make_scraper()
+        listings = scraper._parse_list_results([item], "Houston, TX")
+        assert listings[0].url == "https://www.zillow.com/full-url/"
+
+    def test_parse_list_results_skips_bad_item(self):
+        """Items that raise exceptions during parsing are skipped."""
+        scraper = self._make_scraper()
+        listings = scraper._parse_list_results(
+            [SAMPLE_LISTING, "not-a-dict", SAMPLE_LISTING],
+            "Houston, TX",
+        )
+        assert len(listings) == 2
+
+    def test_find_list_results_nested(self):
+        scraper = self._make_scraper()
+        nested = {
+            "some": {
+                "deep": {
+                    "listResults": [SAMPLE_LISTING],
+                }
+            }
+        }
+        result = scraper._find_list_results(nested)
+        assert result == [SAMPLE_LISTING]
+
+    def test_find_list_results_in_list(self):
+        scraper = self._make_scraper()
+        data = [{"listResults": [SAMPLE_LISTING]}]
+        result = scraper._find_list_results(data)
+        assert result == [SAMPLE_LISTING]
+
+    def test_find_list_results_not_found(self):
+        scraper = self._make_scraper()
+        assert scraper._find_list_results({"no": "results"}) is None
 
     @pytest.mark.asyncio
-    async def test_search_market_calls_api(self):
+    async def test_search_market_json_api(self):
         scraper = self._make_scraper()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "page": 1,
-            "numPages": 1,
-            "count": 1,
-            "listings": [SAMPLE_LISTING],
-        }
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.is_closed = False
-        scraper._client = mock_client
+        mock_response = MagicMock()
+        mock_response.text = (
+            '{"cat1":{"searchResults":{"listResults":'
+            + f"[{__import__('json').dumps(SAMPLE_LISTING)}]"
+            + "}}}"
+        )
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = MagicMock(return_value=mock_response)
+        scraper._fetcher = mock_fetcher
 
         listings = await scraper.search_market("Houston, TX")
 
-        mock_client.get.assert_called_once()
-        call_args = mock_client.get.call_args
-        assert call_args[0][0] == "https://api.repliers.io/listings"
-        assert call_args[1]["headers"]["REPLIERS-API-KEY"] == "test-key"
+        mock_fetcher.fetch.assert_called_once()
+        assert len(listings) == 1
+        assert listings[0].source_id == "12345678"
+
+    @pytest.mark.asyncio
+    async def test_search_market_fallback_to_html(self):
+        scraper = self._make_scraper()
+
+        # First call (JSON API) raises, second call (HTML) returns page
+        call_count = 0
+        html_body = (
+            '<html><script type="application/json">'
+            + '{"cat1":{"searchResults":{"listResults":'
+            + f"[{__import__('json').dumps(SAMPLE_LISTING)}]"
+            + "}}}</script></html>"
+        )
+
+        mock_script = MagicMock()
+        mock_script.css.return_value.get.return_value = (
+            '{"cat1":{"searchResults":{"listResults":'
+            + f"[{__import__('json').dumps(SAMPLE_LISTING)}]"
+            + "}}}"
+        )
+
+        def mock_fetch(url):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("API blocked")
+            resp = MagicMock()
+            resp.text = html_body
+            resp.css.return_value = [mock_script]
+            return resp
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = MagicMock(side_effect=mock_fetch)
+        scraper._fetcher = mock_fetcher
+
+        listings = await scraper.search_market("Houston, TX")
+
+        assert call_count == 2
         assert len(listings) == 1
 
     @pytest.mark.asyncio
-    async def test_search_market_returns_empty_on_error(self):
+    async def test_search_market_all_fail_returns_empty(self):
         scraper = self._make_scraper()
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.text = "Unauthorized"
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.is_closed = False
-        scraper._client = mock_client
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch = MagicMock(side_effect=Exception("blocked"))
+        scraper._fetcher = mock_fetcher
 
         listings = await scraper.search_market("Houston, TX")
         assert listings == []
 
     @pytest.mark.asyncio
-    async def test_search_market_no_api_key_returns_empty(self):
-        scraper = self._make_scraper(api_key="")
-        listings = await scraper.search_market("Houston, TX")
-        assert listings == []
+    async def test_close(self):
+        scraper = self._make_scraper()
+        scraper._fetcher = MagicMock()
+        await scraper.close()
+        assert scraper._fetcher is None
