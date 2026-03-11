@@ -1,7 +1,5 @@
 """Tests for configuration loading."""
 
-from pathlib import Path
-
 from listingiq.config import load_config, AppConfig
 
 
@@ -38,8 +36,6 @@ def test_scraper_config_has_api_key():
     assert cfg.api_key == ""
 
 
-def test_repliers_api_key_env_override(monkeypatch):
-    monkeypatch.setenv("REPLIERS_API_KEY", "test-key-123")
-    from listingiq.config import load_config
+def test_default_source_is_zillow():
     cfg = load_config()
-    assert cfg.scraper.api_key == "test-key-123"
+    assert "zillow" in cfg.scraper.sources

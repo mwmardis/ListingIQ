@@ -35,7 +35,7 @@ class SearchConfig(BaseModel):
 
 
 class ScraperConfig(BaseModel):
-    sources: list[str] = ["repliers"]
+    sources: list[str] = ["zillow"]
     interval_minutes: int = 60
     max_concurrency: int = 5
     delay_min: float = 1.0
@@ -203,9 +203,5 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
         cfg.database.url = db_url
-
-    repliers_key = os.environ.get("REPLIERS_API_KEY")
-    if repliers_key:
-        cfg.scraper.api_key = repliers_key
 
     return cfg

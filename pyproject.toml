@@ -23,6 +23,7 @@ dependencies = [
     "typer>=0.9",
     "aiosmtplib>=3.0",
     "twilio>=9.0",
+    "scrapling[all]>=0.4",
 ]
 
 [project.optional-dependencies]
