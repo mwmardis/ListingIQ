@@ -83,6 +83,15 @@ class AlertRow(Base):
     sent_at = Column(DateTime, default=datetime.utcnow)
 
 
+class WatchlistRow(Base):
+    __tablename__ = "watchlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    query = Column(String(255), nullable=False, unique=True)
+    label = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db(db_url: str = "sqlite:///listingiq.db") -> sessionmaker:
     """Initialize the database and return a session factory."""
     engine = create_engine(db_url, echo=False)

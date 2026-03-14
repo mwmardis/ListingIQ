@@ -7,8 +7,10 @@ first, then falls back to HTML page parsing.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+from functools import partial
 from urllib.parse import urlencode
 
 from scrapling.fetchers import StealthyFetcher
@@ -72,10 +74,47 @@ class ZillowScraper(BaseScraper):
             "requestId": 1,
         }
 
+    def _build_search_url(self, query: str) -> str:
+        """Convert a search query (metro, zip, or neighborhood) to a Zillow URL.
+
+        Formats:
+            "Houston, TX"                    -> /houston-tx/
+            "77084"                          -> /houston-tx/77084/
+            "Spring Branch, Houston, TX"     -> /spring-branch-houston-tx/
+        """
+        query = query.strip()
+
+        # Zip code: all digits
+        if query.isdigit():
+            # Use the first configured market for the metro slug
+            metro = self.search.markets[0] if self.search.markets else ""
+            parts = metro.split(",")
+            city = parts[0].strip().replace(" ", "-").lower()
+            state = parts[1].strip().lower() if len(parts) > 1 else ""
+            metro_slug = f"{city}-{state}" if state else city
+            return f"https://www.zillow.com/{metro_slug}/{query}/"
+
+        # Contains commas: could be "City, ST" or "Neighborhood, City, ST"
+        parts = [p.strip() for p in query.split(",")]
+        slug = "-".join(parts).replace(" ", "-").lower()
+        return f"https://www.zillow.com/{slug}/"
+
+    def _filter_listings(self, listings: list[Listing]) -> list[Listing]:
+        """Apply search config filters (price, beds, baths) client-side."""
+        return [
+            l
+            for l in listings
+            if self.search.min_price <= l.price <= self.search.max_price
+            and self.search.min_beds <= l.beds <= self.search.max_beds
+            and l.baths >= self.search.min_baths
+        ]
+
     async def search_market(self, market: str) -> list[Listing]:
         """Search Zillow for listings in a market.
 
         Tries the JSON API endpoint first, falls back to HTML scraping.
+        Runs the sync Playwright fetcher in a thread to avoid blocking the
+        event loop.
         """
         fetcher = self._get_fetcher()
 
@@ -85,7 +124,7 @@ class ZillowScraper(BaseScraper):
         api_url = f"{SEARCH_API_URL}?{query_string}"
 
         try:
-            response = fetcher.fetch(api_url)
+            response = await asyncio.to_thread(fetcher.fetch, api_url)
             body = response.text
             data = json.loads(body)
             results = (
@@ -94,24 +133,21 @@ class ZillowScraper(BaseScraper):
                 .get("listResults", [])
             )
             if results:
-                return self._parse_list_results(results, market)
+                return self._filter_listings(
+                    self._parse_list_results(results, market)
+                )
         except (json.JSONDecodeError, AttributeError, TypeError, Exception):
             pass
 
         # Fallback: HTML page scraping
-        return self._scrape_html(fetcher, market)
+        return self._filter_listings(await self._scrape_html(fetcher, market))
 
-    def _scrape_html(self, fetcher: StealthyFetcher, market: str) -> list[Listing]:
+    async def _scrape_html(self, fetcher: StealthyFetcher, market: str) -> list[Listing]:
         """Fallback: scrape the Zillow HTML search page."""
-        city_state = market.split(",")
-        city = city_state[0].strip().replace(" ", "-").lower()
-        state = city_state[1].strip().lower() if len(city_state) > 1 else ""
-        slug = f"{city}-{state}" if state else city
-
-        url = f"https://www.zillow.com/{slug}/"
+        url = self._build_search_url(market)
 
         try:
-            response = fetcher.fetch(url)
+            response = await asyncio.to_thread(fetcher.fetch, url)
         except Exception:
             return []
 
@@ -218,7 +254,11 @@ class ZillowScraper(BaseScraper):
                     property_type=prop_type,
                     status=status,
                     days_on_market=(
-                        item.get("variableData", {}).get("daysOnZillow", 0) or 0
+                        item.get("variableData", {}).get("daysOnZillow", 0)
+                        or item.get("hdpData", {})
+                        .get("homeInfo", {})
+                        .get("daysOnZillow", 0)
+                        or 0
                     ),
                     raw_data={
                         "zpid": zpid,

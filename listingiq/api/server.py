@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Query, Body
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from listingiq.config import AppConfig, load_config
 from listingiq.models import Listing
@@ -34,14 +34,16 @@ def create_app(cfg: AppConfig) -> FastAPI:
     @app.get("/api/scan")
     async def scan(
         market: str = Query(None),
+        query: str = Query(None),
         source: str = Query(None),
         min_score: int = Query(70),
         limit: int = Query(20),
     ):
         """Trigger a scan and return results."""
         scraper_cfg = cfg.scraper.model_copy(deep=True)
-        if market:
-            scraper_cfg.search.markets = [market]
+        search_query = query or market
+        if search_query:
+            scraper_cfg.search.markets = [search_query]
 
         sources = [source] if source else cfg.scraper.sources
         all_listings: list[Listing] = []
@@ -309,6 +311,43 @@ def create_app(cfg: AppConfig) -> FastAPI:
     async def get_config():
         """Return current configuration."""
         return cfg.model_dump()
+
+    @app.get("/api/watchlist")
+    async def get_watchlist():
+        """List all saved watchlist areas."""
+        entries = repo.get_watchlist()
+        return [
+            {
+                "id": e.id,
+                "query": e.query,
+                "label": e.label,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in entries
+        ]
+
+    @app.post("/api/watchlist")
+    async def add_watchlist_entry(body: dict = Body(...)):
+        """Add a search area to the watchlist."""
+        query_str = body.get("query", "").strip()
+        if not query_str:
+            return JSONResponse({"error": "query is required"}, status_code=400)
+        label = body.get("label")
+        entry_id = repo.add_watchlist_entry(query_str, label=label)
+        if entry_id is None:
+            return JSONResponse(
+                {"error": f"'{query_str}' is already in your watchlist"},
+                status_code=409,
+            )
+        return {"id": entry_id, "query": query_str, "label": label}
+
+    @app.delete("/api/watchlist/{entry_id}")
+    async def delete_watchlist_entry(entry_id: int):
+        """Remove a search area from the watchlist."""
+        deleted = repo.delete_watchlist_entry(entry_id)
+        if not deleted:
+            return JSONResponse({"error": "Entry not found"}, status_code=404)
+        return {"ok": True}
 
     return app
 
@@ -1116,6 +1155,41 @@ def _dashboard_html() -> str:
             color: var(--gold);
             margin-top: 0.25rem;
         }
+        .watchlist-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.35rem 0.75rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .watchlist-chip:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+        .watchlist-chip .chip-remove {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .watchlist-chip .chip-remove:hover {
+            background: var(--red-dim);
+            color: var(--red);
+        }
     </style>
 </head>
 <body>
@@ -1238,13 +1312,13 @@ def _dashboard_html() -> str:
                 </div>
                 <div class="form-grid">
                     <div class="field" style="grid-column: span 2;">
-                        <label>Market</label>
-                        <input type="text" id="market" placeholder="Houston, TX" value="Houston, TX">
+                        <label>Search</label>
+                        <input type="text" id="market" placeholder="Houston, TX  or  77084  or  Spring Branch, Houston, TX" value="Houston, TX">
                     </div>
                     <div class="field">
                         <label>Source</label>
                         <select id="source">
-                            <option value="repliers">Repliers</option>
+                            <option value="zillow">Zillow</option>
                         </select>
                     </div>
                     <div class="field">
@@ -1257,6 +1331,17 @@ def _dashboard_html() -> str:
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                         Scan for Deals
                     </button>
+                    <button class="btn btn-secondary" onclick="saveToWatchlist()" title="Save this search area">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                        Save Area
+                    </button>
+                </div>
+                <div id="watchlist-bar" style="display:none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+                        <span style="font-size: 0.8rem; color: var(--text-secondary);">Saved Areas</span>
+                        <button class="btn btn-primary" onclick="scanAll()" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Scan All</button>
+                    </div>
+                    <div id="watchlist-chips" style="display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
                 </div>
             </div>
 
@@ -1478,13 +1563,34 @@ def _dashboard_html() -> str:
 
         try {
             const resp = await fetch(
-                `/api/scan?market=${encodeURIComponent(market)}&source=${source}&min_score=${minScore}`
+                `/api/scan?query=${encodeURIComponent(market)}&source=${source}&min_score=${minScore}`
             );
             const data = await resp.json();
 
             if (data.error) {
-                document.getElementById('deals').innerHTML =
-                    `<div class="glass-card"><p style="color:var(--red)">${data.error}</p></div>`;
+                const errEl = document.getElementById('deals');
+                errEl.textContent = '';
+                const errCard = document.createElement('div');
+                errCard.className = 'glass-card';
+                const errP = document.createElement('p');
+                errP.style.color = 'var(--red)';
+                errP.textContent = data.error;
+                errCard.appendChild(errP);
+                errEl.appendChild(errCard);
+                return;
+            }
+
+            if (data.total_listings === 0) {
+                const dealsEl = document.getElementById('deals');
+                dealsEl.textContent = '';
+                const hint = document.createElement('div');
+                hint.className = 'glass-card';
+                const p = document.createElement('p');
+                p.style.color = 'var(--gold)';
+                p.textContent = 'No listings found for this search. For zip codes, try "77084". For neighborhoods, use "Spring Branch, Houston, TX".';
+                hint.appendChild(p);
+                dealsEl.appendChild(hint);
+                document.getElementById('stats').style.display = 'none';
                 return;
             }
 
@@ -1700,9 +1806,132 @@ def _dashboard_html() -> str:
                 </div>`;
             }
         } catch (e) {
-            container.innerHTML = `<div class="glass-card"><p style="color:var(--red)">Error: ${e.message}</p></div>`;
+            container.textContent = '';
+            const errCard = document.createElement('div');
+            errCard.className = 'glass-card';
+            const errP = document.createElement('p');
+            errP.style.color = 'var(--red)';
+            errP.textContent = 'Error: ' + e.message;
+            errCard.appendChild(errP);
+            container.appendChild(errCard);
         }
     }
+
+    /* ── Watchlist ── */
+    async function loadWatchlist() {
+        try {
+            const resp = await fetch('/api/watchlist');
+            const entries = await resp.json();
+            const bar = document.getElementById('watchlist-bar');
+            const chips = document.getElementById('watchlist-chips');
+            if (!entries.length) {
+                bar.style.display = 'none';
+                return;
+            }
+            bar.style.display = 'block';
+            chips.textContent = '';
+            entries.forEach(e => {
+                const chip = document.createElement('div');
+                chip.className = 'watchlist-chip';
+                chip.addEventListener('click', () => searchArea(e.query));
+                const label = document.createElement('span');
+                label.textContent = e.label || e.query;
+                chip.appendChild(label);
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'chip-remove';
+                removeBtn.title = 'Remove';
+                removeBtn.textContent = '\u00d7';
+                removeBtn.addEventListener('click', (evt) => {
+                    evt.stopPropagation();
+                    removeFromWatchlist(e.id);
+                });
+                chip.appendChild(removeBtn);
+                chips.appendChild(chip);
+            });
+        } catch (e) {
+            console.error('Failed to load watchlist:', e);
+        }
+    }
+
+    async function saveToWatchlist() {
+        const query = document.getElementById('market').value.trim();
+        if (!query) return;
+        try {
+            const resp = await fetch('/api/watchlist', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+            if (resp.status === 409) return;
+            await loadWatchlist();
+        } catch (e) {
+            console.error('Failed to save:', e);
+        }
+    }
+
+    async function removeFromWatchlist(id) {
+        try {
+            await fetch('/api/watchlist/' + id, { method: 'DELETE' });
+            await loadWatchlist();
+        } catch (e) {
+            console.error('Failed to remove:', e);
+        }
+    }
+
+    function searchArea(query) {
+        document.getElementById('market').value = query;
+        runScan();
+    }
+
+    async function scanAll() {
+        const resp = await fetch('/api/watchlist');
+        const entries = await resp.json();
+        if (!entries.length) return;
+
+        document.getElementById('loading').classList.add('visible');
+        const dealsEl = document.getElementById('deals');
+        dealsEl.textContent = '';
+        document.getElementById('stats').style.display = 'none';
+
+        const source = document.getElementById('source').value;
+        const minScore = document.getElementById('min-score').value;
+
+        let allDeals = [];
+        let totalListings = 0;
+        const seenAddresses = new Set();
+
+        for (const entry of entries) {
+            try {
+                const r = await fetch(
+                    '/api/scan?query=' + encodeURIComponent(entry.query) + '&source=' + source + '&min_score=' + minScore
+                );
+                const data = await r.json();
+                if (data.error) continue;
+                totalListings += data.total_listings;
+                for (const deal of data.deals) {
+                    if (!seenAddresses.has(deal.address)) {
+                        seenAddresses.add(deal.address);
+                        allDeals.push(deal);
+                    }
+                }
+            } catch (e) {
+                console.error('Scan failed for ' + entry.query + ':', e);
+            }
+        }
+
+        allDeals.sort((a, b) => b.score - a.score);
+
+        document.getElementById('stat-listings').textContent = totalListings.toLocaleString();
+        document.getElementById('stat-deals').textContent = allDeals.length;
+        document.getElementById('stat-best').textContent =
+            allDeals.length ? allDeals[0].score : '\u2014';
+        document.getElementById('stats').style.display = 'grid';
+
+        renderDeals(allDeals);
+        document.getElementById('loading').classList.remove('visible');
+    }
+
+    document.addEventListener('DOMContentLoaded', loadWatchlist);
 </script>
 </body>
 </html>"""

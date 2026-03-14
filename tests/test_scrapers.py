@@ -188,6 +188,50 @@ class TestZillowScraper:
         )
         assert len(listings) == 2
 
+    def test_parse_days_on_market_from_hdp_data(self):
+        """daysOnZillow from hdpData.homeInfo is used when variableData is absent."""
+        item = {**SAMPLE_LISTING}
+        del item["variableData"]
+        item["hdpData"] = {"homeInfo": {"homeType": "SINGLE_FAMILY", "daysOnZillow": 30}}
+        scraper = self._make_scraper()
+        listings = scraper._parse_list_results([item], "Houston, TX")
+        assert listings[0].days_on_market == 30
+
+    def test_filter_listings_by_price(self):
+        scraper = self._make_scraper()
+        over_max = {**SAMPLE_LISTING, "unformattedPrice": 750000}
+        under_min = {**SAMPLE_LISTING, "unformattedPrice": 10000, "zpid": "2"}
+        in_range = {**SAMPLE_LISTING, "unformattedPrice": 300000, "zpid": "3"}
+        listings = scraper._parse_list_results(
+            [over_max, under_min, in_range], "Houston, TX"
+        )
+        filtered = scraper._filter_listings(listings)
+        assert len(filtered) == 1
+        assert filtered[0].price == pytest.approx(300000.0)
+
+    def test_filter_listings_by_beds(self):
+        scraper = self._make_scraper()
+        too_few = {**SAMPLE_LISTING, "beds": 1, "zpid": "a"}
+        too_many = {**SAMPLE_LISTING, "beds": 8, "zpid": "b"}
+        ok = {**SAMPLE_LISTING, "beds": 3, "zpid": "c"}
+        listings = scraper._parse_list_results(
+            [too_few, too_many, ok], "Houston, TX"
+        )
+        filtered = scraper._filter_listings(listings)
+        assert len(filtered) == 1
+        assert filtered[0].beds == 3
+
+    def test_filter_listings_by_baths(self):
+        scraper = self._make_scraper()
+        too_few = {**SAMPLE_LISTING, "baths": 0.5, "zpid": "x"}
+        ok = {**SAMPLE_LISTING, "baths": 2.0, "zpid": "y"}
+        listings = scraper._parse_list_results(
+            [too_few, ok], "Houston, TX"
+        )
+        filtered = scraper._filter_listings(listings)
+        assert len(filtered) == 1
+        assert filtered[0].baths == pytest.approx(2.0)
+
     def test_find_list_results_nested(self):
         scraper = self._make_scraper()
         nested = {
@@ -287,3 +331,39 @@ class TestZillowScraper:
         scraper._fetcher = MagicMock()
         await scraper.close()
         assert scraper._fetcher is None
+
+
+class TestBuildSearchUrl:
+    def _make_scraper(self):
+        cfg = ScraperConfig(search=SearchConfig(markets=["Houston, TX"]))
+        return ZillowScraper(cfg)
+
+    def test_metro_input(self):
+        scraper = self._make_scraper()
+        url = scraper._build_search_url("Houston, TX")
+        assert url == "https://www.zillow.com/houston-tx/"
+
+    def test_zip_code_input(self):
+        scraper = self._make_scraper()
+        url = scraper._build_search_url("77084")
+        assert url == "https://www.zillow.com/houston-tx/77084/"
+
+    def test_neighborhood_input(self):
+        scraper = self._make_scraper()
+        url = scraper._build_search_url("Spring Branch, Houston, TX")
+        assert url == "https://www.zillow.com/spring-branch-houston-tx/"
+
+    def test_neighborhood_multi_word_city(self):
+        scraper = self._make_scraper()
+        url = scraper._build_search_url("Downtown, San Antonio, TX")
+        assert url == "https://www.zillow.com/downtown-san-antonio-tx/"
+
+    def test_zip_with_spaces(self):
+        scraper = self._make_scraper()
+        url = scraper._build_search_url("  77084  ")
+        assert url == "https://www.zillow.com/houston-tx/77084/"
+
+    def test_metro_lowercase_handling(self):
+        scraper = self._make_scraper()
+        url = scraper._build_search_url("AUSTIN, TX")
+        assert url == "https://www.zillow.com/austin-tx/"

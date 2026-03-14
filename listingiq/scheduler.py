@@ -26,17 +26,36 @@ async def _run_cycle(cfg: AppConfig) -> None:
     repo = Repository(cfg.database.url)
     all_listings: list[Listing] = []
 
+    # Use watchlist entries if available, otherwise configured markets
+    watchlist = repo.get_watchlist()
+    if watchlist:
+        markets = [entry.query for entry in watchlist]
+        logger.info("Using %d watchlist areas", len(markets))
+    else:
+        markets = cfg.scraper.search.markets
+
     # Scrape all sources
     for source_name in cfg.scraper.sources:
         try:
             scraper_cls = get_scraper(source_name)
-            scraper = scraper_cls(cfg.scraper)
+            scraper_cfg = cfg.scraper.model_copy(deep=True)
+            scraper_cfg.search.markets = markets
+            scraper = scraper_cls(scraper_cfg)
             listings = await scraper.scrape()
             all_listings.extend(listings)
             logger.info("%s: found %d listings", source_name, len(listings))
             await scraper.close()
         except Exception as e:
             logger.error("Error scraping %s: %s", source_name, e)
+
+    # Deduplicate by source_id (overlapping areas may return same listing)
+    seen_ids: set[str] = set()
+    unique_listings: list[Listing] = []
+    for listing in all_listings:
+        if listing.source_id not in seen_ids:
+            seen_ids.add(listing.source_id)
+            unique_listings.append(listing)
+    all_listings = unique_listings
 
     if not all_listings:
         logger.warning("No listings found this cycle")

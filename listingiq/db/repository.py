@@ -7,7 +7,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from listingiq.db.tables import ListingRow, DealRow, AlertRow, init_db
+from listingiq.db.tables import ListingRow, DealRow, AlertRow, WatchlistRow, init_db
 from listingiq.models import Listing, DealAnalysis
 
 
@@ -144,4 +144,38 @@ class Repository:
                 .filter_by(source=source, source_id=source_id)
                 .first()
                 is not None
+            )
+
+    def add_watchlist_entry(self, query: str, label: str | None = None) -> int | None:
+        """Add a watchlist entry. Returns ID or None if duplicate."""
+        with self._session() as session:
+            existing = (
+                session.query(WatchlistRow)
+                .filter(WatchlistRow.query.ilike(query.strip()))
+                .first()
+            )
+            if existing:
+                return None
+            row = WatchlistRow(query=query.strip(), label=label)
+            session.add(row)
+            session.commit()
+            return row.id
+
+    def delete_watchlist_entry(self, entry_id: int) -> bool:
+        """Delete a watchlist entry by ID. Returns True if deleted."""
+        with self._session() as session:
+            row = session.query(WatchlistRow).get(entry_id)
+            if not row:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    def get_watchlist(self) -> list[WatchlistRow]:
+        """Get all watchlist entries ordered by creation date."""
+        with self._session() as session:
+            return (
+                session.query(WatchlistRow)
+                .order_by(WatchlistRow.created_at.asc())
+                .all()
             )

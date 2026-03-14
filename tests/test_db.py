@@ -92,3 +92,58 @@ def test_upsert_listing_with_new_fields(repo):
     assert row.school_rating == 8.0
     assert row.flood_zone == "X"
     assert row.crime_score == 2.5
+
+
+class TestWatchlist:
+    def _make_repo(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path / 'test.db'}"
+        return Repository(db_url)
+
+    def test_add_watchlist_entry(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        entry_id = repo.add_watchlist_entry("77084")
+        assert entry_id is not None
+        entries = repo.get_watchlist()
+        assert len(entries) == 1
+        assert entries[0].query == "77084"
+
+    def test_add_watchlist_entry_with_label(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        repo.add_watchlist_entry("77084", label="Cypress Area")
+        entries = repo.get_watchlist()
+        assert entries[0].label == "Cypress Area"
+
+    def test_add_duplicate_watchlist_entry(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        repo.add_watchlist_entry("77084")
+        duplicate_id = repo.add_watchlist_entry("77084")
+        assert duplicate_id is None
+        entries = repo.get_watchlist()
+        assert len(entries) == 1
+
+    def test_add_duplicate_case_insensitive(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        repo.add_watchlist_entry("Houston, TX")
+        duplicate_id = repo.add_watchlist_entry("houston, tx")
+        assert duplicate_id is None
+
+    def test_delete_watchlist_entry(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        entry_id = repo.add_watchlist_entry("77084")
+        deleted = repo.delete_watchlist_entry(entry_id)
+        assert deleted is True
+        assert repo.get_watchlist() == []
+
+    def test_delete_nonexistent_entry(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        deleted = repo.delete_watchlist_entry(999)
+        assert deleted is False
+
+    def test_get_watchlist_ordered_by_created(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        repo.add_watchlist_entry("77084")
+        repo.add_watchlist_entry("77088")
+        repo.add_watchlist_entry("Spring Branch, Houston, TX")
+        entries = repo.get_watchlist()
+        assert len(entries) == 3
+        assert entries[0].query == "77084"
